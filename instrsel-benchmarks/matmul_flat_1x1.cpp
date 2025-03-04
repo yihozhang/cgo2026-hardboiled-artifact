@@ -97,32 +97,22 @@ bool matmul_bf16(Halide::Target target) {
                 .split(x, x, rxi, tile_x)
                 .split(y, y, ryi, tile_y)
                 .split(r.x, rro, rri, tile_r)
-                // .split(rro, rro, rroo, 4)
-                // .reorder({rri, rxi, ryi, x, y, rroo, rro})
-                .reorder({rri, rxi, ryi, x, y, rro})
-                // .unroll(rroo)
+
+                .split(rro, rro, rroo, 4)
+                .reorder({rri, rxi, ryi, x, y, rroo, rro})
+                // .reorder({rri, rxi, ryi, x, y, rro})
+                .unroll(rroo)
+                .unroll(x)
+                .unroll(y)
                 .atomic()
                 .vectorize(rri)
                 .vectorize(rxi)
                 .vectorize(ryi);
 
-            B.in(mm).compute_at(mm, rro).store_in(MemoryType::WMMAB)
-                .split(x, x, rxi, tile_x)
-                .split(y, y, ryi, tile_y)
-            // .unroll(x)
-            .vectorize(rxi)
-            .vectorize(ryi)
-            // .unroll(y))
-            // .unroll(x)
-            ;
-            // A.in(mm).compute_at(mm, rro).store_in(MemoryType::WMMAB)
-            //     .split(x, x, rxi, tile_x)
-            //     .split(y, y, ryi, tile_y)
-            // .vectorize(rxi)
-            // // .unroll(x)
-            // .vectorize(ryi)
-            // // .unroll(y)
-            // ;
+            B.in(mm).compute_at(mm, rroo).store_in(MemoryType::WMMAB)
+                .vectorize(x)
+                .vectorize(y)
+                ;
 
             // initialization
             mm.split(x, x, rxi, tile_x)
