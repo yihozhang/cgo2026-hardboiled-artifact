@@ -6,7 +6,8 @@
 (run-schedule 
     (repeat 15
         (saturate (run typechecking))
-        (run)))
+        (run)
+        (run amx)))
 (run-schedule (saturate 
     (saturate (run typechecking))
     (run push-down-vector-reduce)))
