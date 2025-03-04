@@ -11,8 +11,7 @@ using namespace Halide;
 bool matmul_bf16(Halide::Target target) {
     (void)target;
 
-    const int acc = 16;
-    // const int acc = 64;
+    const int acc = 4096;
 
     Var x("x"), y("y");
     ImageParam A_input(Float(32), 2, "lhs");
@@ -66,8 +65,13 @@ bool matmul_bf16(Halide::Target target) {
 
         Func A("A");
         Func B("B");
+        Var xi("xi"), yi("yi");
         Var rxi("rxi"), ryi("ryi");
-        RVar rri("rri"), rro("rro");
+        RVar rri("rri"), rro("rro"), rroo("rroo");
+        Var mmxi("mmxi"),
+            mmyi("mmyi");
+        RVar mmri("mmri");
+        Var xy("xy"), xyi("xyi");
 
         int tile_x = 16;
         int tile_y = 16;
@@ -76,54 +80,151 @@ bool matmul_bf16(Halide::Target target) {
         A(x, y) = cast<float16_t>(A_input(x, y));
         B(x, y) = cast<float16_t>(B_input(x, y));
 
-        A.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
-        B.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
-
         mm(x, y) = cast<float>(0);
         mm(x, y) += cast<float>(A(r.x, y)) * cast<float>(B(x, r.x));
 
-        // A.compute_at(mm, rro)
-        //     .store_in(MemoryType::GPUShared)
-        //     .split(x, x, rxi, 2)
-        //     .fuse(y, rxi, y)
-        //     .gpu_lanes(y);
-        // B.compute_at(mm, rro)
-        //     .store_in(MemoryType::GPUShared)
-        //     .split(y, y, ryi, 2)
-        //     .fuse(x, ryi, x)
-        //     .gpu_lanes(x);
+        int schedule = 0;
 
+        if (schedule == 0) {
+            // preload B and unroll
+            A.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
+            B.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
 
-        // update
-        mm.compute_at(mm.in(), x)
-            .store_in(MemoryType::WMMAAccumulator)
-            .update()
-            .split(x, x, rxi, tile_x)
-            .split(y, y, ryi, tile_y)
-            .split(r.x, rro, rri, tile_r)
-            .reorder({rri, rxi, ryi, rro, x, y})
-            .atomic()
-            .vectorize(rri)
+            // update
+            mm.compute_at(mm.in(), x)
+                .store_in(MemoryType::WMMAAccumulator)
+                .update()
+                .split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .split(r.x, rro, rri, tile_r)
+                // .split(rro, rro, rroo, 4)
+                // .reorder({rri, rxi, ryi, x, y, rroo, rro})
+                .reorder({rri, rxi, ryi, x, y, rro})
+                // .unroll(rroo)
+                .atomic()
+                .vectorize(rri)
+                .vectorize(rxi)
+                .vectorize(ryi);
+
+            B.in(mm).compute_at(mm, rro).store_in(MemoryType::WMMAB)
+                .split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+            // .unroll(x)
             .vectorize(rxi)
             .vectorize(ryi)
+            // .unroll(y))
+            // .unroll(x)
             ;
+            // A.in(mm).compute_at(mm, rro).store_in(MemoryType::WMMAB)
+            //     .split(x, x, rxi, tile_x)
+            //     .split(y, y, ryi, tile_y)
+            // .vectorize(rxi)
+            // // .unroll(x)
+            // .vectorize(ryi)
+            // // .unroll(y)
+            // ;
 
-        // initialization
-        mm.split(x, x, rxi, tile_x)
-            .split(y, y, ryi, tile_y)
-            .vectorize(rxi)
-            .vectorize(ryi);
+            // initialization
+            mm.split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .vectorize(rxi)
+                .vectorize(ryi)
+                .unroll(y);
 
-        Var mmxi("mmxi"),
-            mmyi("mmyi");
-        mm.in()
-            .split(x, x, mmxi, tile_x)
-            .split(y, y, mmyi, tile_y)
-            .gpu_blocks(x, y)
-            .reorder({mmxi, mmyi, x, y})
-            // .atomic()
-            .vectorize(mmxi)
-            .vectorize(mmyi);
+            mm.in()
+                .split(x, x, xi, tile_x)
+                .split(xi, xi, mmxi, tile_x)
+                .split(y, y, yi, tile_y * 4)
+                .split(yi, yi, mmyi, tile_y)
+                .gpu_blocks(x, y)
+                .reorder({mmxi, mmyi, xi, yi, x, y})
+                .unroll(xi)
+                .unroll(yi)
+                .vectorize(mmxi)
+                .vectorize(mmyi)
+                ;
+        } else if (schedule == 1) {
+            // on-the-fly conversion
+
+            A.compute_at(mm, rro)
+                .store_in(MemoryType::GPUShared)
+                // .store_in(MemoryType::Heap)
+                .split(x, x, rxi, 2)
+                .fuse(y, rxi, y)
+                .gpu_lanes(y);
+            B.compute_at(mm, rro)
+                .store_in(MemoryType::GPUShared)
+                // .store_in(MemoryType::Heap)
+                .split(y, y, ryi, 2)
+                .fuse(x, ryi, x)
+                .gpu_lanes(x);
+
+            // update
+            mm.compute_at(mm.in(), x)
+                .store_in(MemoryType::WMMAAccumulator)
+                .update()
+                .split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .split(r.x, rro, rri, tile_r)
+                .reorder({rri, rxi, ryi, rro, x, y})
+                .atomic()
+                .vectorize(rri)
+                .vectorize(rxi)
+                .vectorize(ryi);
+
+            // initialization
+            mm.split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .vectorize(rxi)
+                .vectorize(ryi);
+
+            Var mmxi("mmxi"),
+                mmyi("mmyi");
+            mm.in()
+                .split(x, x, mmxi, tile_x)
+                .split(y, y, mmyi, tile_y)
+                .gpu_blocks(x, y)
+                .reorder({mmxi, mmyi, x, y})
+                // .atomic()
+                .vectorize(mmxi)
+                .vectorize(mmyi);
+
+        } else if (schedule == 2) {
+            // naive
+            A.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
+            B.compute_root().gpu_tile(x, y, rxi, ryi, tile_x, tile_y);
+
+            // update
+            mm.compute_at(mm.in(), x)
+                .store_in(MemoryType::WMMAAccumulator)
+                .update()
+                .split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .split(r.x, rro, rri, tile_r)
+                .reorder({rri, rxi, ryi, rro, x, y})
+                .atomic()
+                .vectorize(rri)
+                .vectorize(rxi)
+                .vectorize(ryi);
+
+            // initialization
+            mm.split(x, x, rxi, tile_x)
+                .split(y, y, ryi, tile_y)
+                .vectorize(rxi)
+                .vectorize(ryi);
+
+            Var mmxi("mmxi"),
+                mmyi("mmyi");
+            mm.in()
+                .split(x, x, mmxi, tile_x)
+                .split(y, y, mmyi, tile_y)
+                .gpu_blocks(x, y)
+                .reorder({mmxi, mmyi, x, y})
+                // .atomic()
+                .vectorize(mmxi)
+                .vectorize(mmyi);
+
+        }
     } else {
         printf("Architecture not supported");
         exit(1);
@@ -131,13 +232,11 @@ bool matmul_bf16(Halide::Target target) {
 
     Func result = mm.in();
 
-    result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A_input, B_input}, HTML, target);
+    // result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A_input, B_input}, HTML, target);
 
     // test
-    // int row = 4096;
-    // int col = 4096;
-    int row = 16;
-    int col = 16;
+    int row = 4096;
+    int col = 4096;
     Buffer<float> a_buf(acc, row);
     fill_buffer_flat_one(a_buf, row, acc);
     A_input.set(a_buf);
@@ -158,7 +257,10 @@ bool matmul_bf16(Halide::Target target) {
         out.copy_to_host();
     }
 
-    if (1) {
+    if (0) {
+        int row = 4096;
+        int col = 4096;
+
         for (int j = 0; j < row; ++j) {
             for (int i = 0; i < col; ++i) {
                 float val = 0;
@@ -167,7 +269,7 @@ bool matmul_bf16(Halide::Target target) {
                 }
                 if (fabs(val - out(i, j)) > 0.001) {
                     std::cerr << "Invalid result at " << i << ", " << j << "\n"
-                            << out(i, j) << " != " << val << "\n";
+                              << out(i, j) << " != " << val << "\n";
                     return false;
                 }
             }
@@ -184,7 +286,7 @@ int main(int argc, char **argv) {
     // Target target("x86-64-linux-avx512_sapphirerapids");
     // Target target("x86-64-linux-cuda_capability_70");
     Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability70)
-        .with_feature(Target::Debug)
+        // .with_feature(Target::Debug)
         ;
     // Target target = get_jit_target_from_environment();
     std::cout << target;

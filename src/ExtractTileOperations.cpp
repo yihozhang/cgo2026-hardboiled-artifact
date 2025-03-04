@@ -1015,7 +1015,7 @@ class EnforceWMMALanes : public IRMutator {
         int vec_length = ramp->lanes;
         const int64_t *basep = as_const_int(ramp->base);
         if (!basep) {
-            internal_error << "Only constant base is supported in WMMA";
+            internal_error << "Only constant base is supported in WMMA, get " << ramp->base;
             return -1;
         }
         int base = (int)*basep;

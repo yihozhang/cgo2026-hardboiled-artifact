@@ -168,6 +168,7 @@
     (= m-lanes 16)
     (= n-lanes 16)
 ) (
+    ;; TODO: n-stride is not utilized
     (let new-e (Call "wmma.load.b.sync.aligned.row.m16n16k16.f16" ty (vec-of (Var (Handle 1) name) base (IntImm32 0))))
     (union e new-e)
 ))
