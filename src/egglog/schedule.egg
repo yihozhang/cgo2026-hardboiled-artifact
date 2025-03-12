@@ -4,7 +4,7 @@
 (rule () ((keep-best __INPUTS__ "AMXShape" "AMXAllocation" "WMMAShape" "WMMAAllocation" "CommBop" "AddOrSub")) :ruleset keep-best)
 
 (run-schedule 
-    (repeat 15
+    (repeat 14
         (saturate (run typechecking))
         (run)
         (run amx)))

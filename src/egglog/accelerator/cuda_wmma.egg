@@ -30,6 +30,8 @@
 (birewrite (Cast ty (Mem2WMMA e)) (Mem2WMMA (Cast ty e)))
 (birewrite (BroadcastPer p (Mem2WMMA e) l) (Mem2WMMA (BroadcastPer p e l)))
 (birewrite (WMMA2Mem (BroadcastPer p e l)) (BroadcastPer p (WMMA2Mem e) l))
+(birewrite (Broadcast (Mem2WMMA e) l) (Mem2WMMA (Broadcast e l)))
+(birewrite (WMMA2Mem (Broadcast e l)) (Broadcast (WMMA2Mem e) l))
 
 
 (relation wmma-f16-rhs (
@@ -58,7 +60,7 @@
 
     (= x-lanes 16)
     (= y-lanes 16)
-    (= r-lanes 16)
+    ; (= r-lanes 16)
 ) (
     (let new-rhs (Call "wmma.load.b.sync.aligned.row.m16n16k16.f16" (Float 16 256) (vec-of (Var (Handle 1) rhs-name) rhs-base rhs-r-stride)))
     (wmma-f16-rhs rhs x-lanes y-lanes r-lanes new-rhs)
@@ -66,10 +68,10 @@
 
 
 
-    ; (wmma-f16-rhs 
-    ;     (WMMA2Mem (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 ) 16) 16))) 
-    ;     16 16 16
-    ;     (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 1) 16) 16)))
+; (wmma-f16-rhs 
+;     (WMMA2Mem (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 ) 16) 16))) 
+;     16 16 16
+;     (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 1) 16) 16)))
 (rule (
     (= orig-rhs-mem (WMMA2Mem orig-rhs))
     (= orig-rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
@@ -80,9 +82,9 @@
                    y-lanes)
             x-lanes))
 
-    (= x-lanes 16)
-    (= y-lanes 16)
-    (= r-lanes 16)
+    ; (= x-lanes 16)
+    ; (= y-lanes 16)
+    ; (= r-lanes 16)
 ) (
     (let new-rhs (Load (Float 16 (* r-lanes y-lanes)) rhs-name (Ramp rhs-base (IntImm32 1) (* r-lanes y-lanes))))
     (wmma-f16-rhs orig-rhs-mem x-lanes y-lanes r-lanes new-rhs)
@@ -110,7 +112,7 @@
 
         (= x-lanes 16)
         (= y-lanes 16)
-        (= r-lanes 16)
+        ; (= r-lanes 16)
     ) (
         (let new-lhs (Call "wmma.load.a.sync.aligned.row.m16n16k16.f16" (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
         (let new-mat (Mem2WMMA mat))
@@ -170,6 +172,82 @@
 ) (
     ;; TODO: n-stride is not utilized
     (let new-e (Call "wmma.load.b.sync.aligned.row.m16n16k16.f16" ty (vec-of (Var (Handle 1) name) base (IntImm32 0))))
+    (union e new-e)
+))
+
+(rule (
+    (= e (Bop (Add)
+            (VectorReduce (Float 32 out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float 32 tot-lanes) lhs)
+                    (Cast (Float 32 tot-lanes) rhs))
+            )
+            mat))
+    (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+
+    (= lhs-index 
+        (Ramp 
+            (Ramp 
+                (Ramp bl s1a l1) 
+                (Broadcast s2 l1) 
+                l2) 
+            (Broadcast s3 (* l1 l2)) 
+            l3))
+    (= rhs-index 
+        (Broadcast 
+            (Broadcast (Ramp br s1b l1) l2) l3))
+
+    (= s2 s1a)
+    (= s1a (IntImm32 1))
+    (= lhs-inner-offset 1)
+    ; (= (% s2 s1a) 0)
+    ; (= (/ s1 s1a) lhs-inner-offset)
+) (
+    (let new-l1 (+ l1 (* lhs-inner-offset l2)))
+    (let new-tot-lanes (* (* new-l1 l2) l3))
+    (let new-lhs-index
+        (Ramp 
+            (Broadcast 
+                (Ramp bl s1a new-l1)
+                l2)
+            (Broadcast s3 (* new-l1 l2))
+            l3)
+    )
+    (let new-lhs (Load (Float 16 new-tot-lanes) lhs-name new-lhs-index))
+    
+    (let new-rhs-index 
+        (Broadcast 
+            (Ramp 
+                (Ramp (IntImm32 0) (IntImm32 l2) new-l1)
+                (Broadcast (IntImm32 1) new-l1)
+                l2)
+            l3))
+    (let new-rhs-name
+        (ExprVar (Mem)
+            (Call "weird_shuffle" (Float 16 (* new-l1 l2))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2)))
+        )
+    )
+    (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
+
+    (let new-e 
+        (Bop (Add)
+                (VectorReduce (Float 32 out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float 32 new-tot-lanes) new-lhs)
+                        (Cast (Float 32 new-tot-lanes) new-rhs))
+                )
+                mat))
+
+    ; (extract new-l1)
+    ; (extract l2)
+    ; (extract l3)
+    ; (extract new-e)
+    ; (extract s2)
+    ; (extract s1a)
+    ; (extract new-e)
+    ; (panic "?")
     (union e new-e)
 ))
 

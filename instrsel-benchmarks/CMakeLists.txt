@@ -8,4 +8,5 @@ tests(GROUPS instrsel-benchmarks
         matmul_vnni_1x4.cpp
         matmul_vnni_1x1.cpp
         matmul_vnni_2x2.cpp
+        convolution.cpp
 )
