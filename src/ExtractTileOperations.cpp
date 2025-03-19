@@ -1161,6 +1161,37 @@ protected:
             }
             return Shuffle::make({vec}, indices);
 
+        } else if (call->name == "ConvolutionShuffle") {
+            const std::vector<Expr>& args = call->args;
+            internal_assert(args.size() == 5);
+            for (auto& arg: args) {
+                std::cerr << arg << "\n";
+            }
+            const auto *var = args[0].as<Variable>();
+            auto base_r = args[1];
+            auto stride_r = args[2];
+            const auto *l1 = as_const_int(args[3]);
+            const auto *l2 = as_const_int(args[4]);
+            if (!(var && l1 && l2)) {
+                internal_error << "ConvolutionShuffle: arguments have unexpected type\n";
+                return Expr();
+            }
+            auto ty = Float(16, *l1);
+            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, *l1), {}, {}, const_true(*l1), {});
+            Expr vec2 = FloatImm::make(Float(16), 0);
+            vector<int> indices;
+            for (int i = 0; i < *l2; i++) {
+                for (int j = 0; j < *l1 + *l2; j++) {
+                    if (0 <= j - i && j - i < *l1) {
+                        indices.push_back(j - i);
+                    } else {
+                        indices.push_back(*l1);
+                    }
+                }
+            }
+            auto v = Shuffle::make({vec1, vec2}, indices);
+            std::cerr << *l1 << " " << *l2 << " " << v << "\n";
+            return v;
         } else {
             return IRMutator::visit(call);
         }
@@ -1262,6 +1293,26 @@ Stmt post_process_wmma(const Stmt &s) {
 
 std::string run_egglog(std::vector<std::pair<std::string, std::string>> &&binding) {
 #include "egglog/main.tmpl.h"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     std::string egglog_prog = EGGLOG_PROG(std::move(binding));
 

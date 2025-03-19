@@ -201,6 +201,9 @@
     (= s2 s1a)
     (= s1a (IntImm32 1))
     (= lhs-inner-offset 1)
+    ;; NB: if we relax the restriction to be that lhs-inner-offset 
+    ;; can be greater than 0, then we need to pass that
+    ;; lhs-inner-offset to ConvolutionShuffle
     ; (= (% s2 s1a) 0)
     ; (= (/ s1 s1a) lhs-inner-offset)
 ) (
@@ -225,7 +228,7 @@
             l3))
     (let new-rhs-name
         (ExprVar (Mem)
-            (Call "weird_shuffle" (Float 16 (* new-l1 l2))
+            (Call "ConvolutionShuffle" (Float 16 (* new-l1 l2))
                 (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2)))
         )
     )
