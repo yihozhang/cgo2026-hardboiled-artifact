@@ -82,8 +82,8 @@
                    y-lanes)
             x-lanes))
 
-    ; (= x-lanes 16)
-    ; (= y-lanes 16)
+    (= x-lanes 16)
+    (= y-lanes 16)
     ; (= r-lanes 16)
 ) (
     (let new-rhs (Load (Float 16 (* r-lanes y-lanes)) rhs-name (Ramp rhs-base (IntImm32 1) (* r-lanes y-lanes))))
