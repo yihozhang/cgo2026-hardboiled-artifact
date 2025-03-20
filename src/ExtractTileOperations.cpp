@@ -795,8 +795,17 @@ public:
     struct PrologueStmt {
         std::string name;
         Expr expr;
+        std::set<string> free_vars;
+
+        PrologueStmt(std::string name, Expr expr) {
+            this->name = std::move(name);
+            this->expr = std::move(expr);
+            FreeVars free_vars;
+            free_vars.mutate(this->expr);
+            this->free_vars = free_vars.free_vars;
+        }
     };
-    RemoveGLoadsAndGVars(const std::string &prefix)
+    explicit RemoveGLoadsAndGVars(const std::string &prefix)
         : prefix(prefix) {
     }
 
@@ -804,20 +813,33 @@ public:
         return this->prologues;
     }
 
+    class FreeVars : public EqSatIRMutator {
+        using EqSatIRMutator::visit;
+
+    public:
+        std::set<string> free_vars;
+
+    protected:
+        Expr visit(const Variable *op) override {
+            free_vars.insert(op->name);
+            return EqSatIRMutator::visit(op);
+        }
+    };
+
 protected:
     std::string prefix;
     int store_no = 0;
     std::vector<PrologueStmt> prologues;
     Expr visit(const GLoad *load) override {
-        if (const StringVar *v = load->name.get()->to_string_var()) {
+        if (const StringVar *v = load->name->to_string_var()) {
             return Load::make(load->type, v->name, EqSatIRMutator::mutate(load->index), load->image, load->param, EqSatIRMutator::mutate(load->predicate), load->alignment);
-        } else if (const ExprVar *v = load->name.get()->to_expr_var()) {
+        } else if (const ExprVar *v = load->name->to_expr_var()) {
             // We traverse children first to ensure that the prologues are in the correct order
             Expr predicate = EqSatIRMutator::mutate(load->predicate);
             Expr index = EqSatIRMutator::mutate(load->index);
 
             std::string name = prefix + ".temporary." + std::to_string(store_no++);
-            prologues.push_back({name, mutate(v->expr)});
+            prologues.emplace_back(name, mutate(v->expr));
             return Load::make(load->type, name, index, load->image, load->param, predicate, load->alignment);
         } else {
             internal_error << "GLoad name must be a StringVar or ExprVar\n";
@@ -826,11 +848,11 @@ protected:
     }
 
     Expr visit(const GVariable *var) override {
-        if (const StringVar *v = var->name.get()->to_string_var()) {
+        if (const StringVar *v = var->name->to_string_var()) {
             return Variable::make(var->type, v->name);
-        } else if (const ExprVar *v = var->name.get()->to_expr_var()) {
+        } else if (const ExprVar *v = var->name->to_expr_var()) {
             auto name = prefix + ".temporary." + std::to_string(store_no++);
-            prologues.push_back({name, mutate(v->expr)});
+            prologues.emplace_back(name, mutate(v->expr));
             return Variable::make(var->type, name);
         } else {
             internal_error << "GVariable name must be a StringVar\n";
@@ -842,9 +864,46 @@ protected:
 struct SubstStores : public EqSatIRMutator {
     using EqSatIRMutator::visit;
     const std::map<std::string, Stmt> &stores;
+    std::set<std::string> avail_vars;
+    std::vector<RemoveGLoadsAndGVars::PrologueStmt> pending_definitions;
 
     SubstStores(std::map<std::string, Stmt> &&stores)
         : stores(stores) {
+    }
+
+    Stmt insert_pending_definitions(Stmt body) {
+        auto it = pending_definitions.begin();
+        while (it != pending_definitions.end()) {
+            auto &prologue = *it;
+            // Find the first place where not every variable is available.
+            if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
+                const int lanes = prologue.expr.type().lanes();
+                body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
+                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+                it = pending_definitions.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return body;
+    }
+
+    Stmt visit(const For *op) override {
+        const string name = op->name;
+        avail_vars.insert(name);
+        Stmt body = mutate(op->body);
+        avail_vars.erase(name);
+        body = insert_pending_definitions(body);
+        return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
+    }
+
+    Stmt visit(const LetStmt *op) override {
+        string name = op->name;
+        avail_vars.insert(name);
+        Stmt body = mutate(op->body);
+        avail_vars.erase(name);
+        body = insert_pending_definitions(body);
+        return LetStmt::make(op->name, mutate(op->value), body);
     }
 
     Stmt visit(const Store *op) override {
@@ -859,16 +918,8 @@ struct SubstStores : public EqSatIRMutator {
         RemoveGLoadsAndGVars remover(prefix);
         s = remover.mutate(s);
 
-        vector<Stmt> stores;
-        for (const auto &prologue : remover.get_prologues()) {
-            int lanes = prologue.expr.type().lanes();
-            stores.push_back(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()));
-        }
-        stores.push_back(s);
-        s = Block::make(stores);
-        for (auto i = remover.get_prologues().rbegin(); i != remover.get_prologues().rend(); i++) {
-            s = Allocate::make(i->name, i->expr.type().with_lanes(1), MemoryType::Auto, {i->expr.type().lanes()}, const_true(i->expr.type().lanes()), s);
-        }
+        auto prologues = remover.get_prologues();
+        pending_definitions.insert(pending_definitions.end(), prologues.begin(), prologues.end());
 
         return s;
     }
@@ -1001,9 +1052,13 @@ class EnforceWMMALanes : public IRMutator {
     std::map<string, MemoryType> tile_vars;
     std::map<string, Type> intrinsic_types = {
         {"wmma.load.a.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
+        {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
+        {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8)},
+        {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8)},
+        {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
     };
 
     int get_nth_tile_from_tile_index_wmma(const Expr &e) {
@@ -1060,11 +1115,11 @@ protected:
                 op->value_index,
                 op->image,
                 op->param);
-        } else if (op->name == "wmma.load.c.sync.aligned.row.m16n16k16.f32.ZERO") {
+        } else if (ends_with(op->name, ".ZERO") && starts_with(op->name, "wmma.load.c.sync.aligned.")) {
             wmma_used = true;
             return make_zero(Float(32, 8));
         } else {
-            if (op->name == "wmma.store.d.sync.aligned.row.m16n16k16.f32") {
+            if (starts_with(op->name, "wmma.store.d.sync.aligned.")) {
                 wmma_used = true;
             }
             return IRMutator::visit(op);
@@ -1162,11 +1217,8 @@ protected:
             return Shuffle::make({vec}, indices);
 
         } else if (call->name == "ConvolutionShuffle") {
-            const std::vector<Expr>& args = call->args;
+            const std::vector<Expr> &args = call->args;
             internal_assert(args.size() == 5);
-            for (auto& arg: args) {
-                std::cerr << arg << "\n";
-            }
             const auto *var = args[0].as<Variable>();
             auto base_r = args[1];
             auto stride_r = args[2];
@@ -1190,7 +1242,6 @@ protected:
                 }
             }
             auto v = Shuffle::make({vec1, vec2}, indices);
-            std::cerr << *l1 << " " << *l2 << " " << v << "\n";
             return v;
         } else {
             return IRMutator::visit(call);
@@ -1222,10 +1273,10 @@ protected:
     }
 
     Stmt visit(const For *op) override {
-        if (op->for_type == ForType::GPULane && alloc_ops.size() > 0) {
+        if (op->for_type == ForType::GPULane && !alloc_ops.empty()) {
             auto body = op->body;
             for (auto iter = alloc_ops.rbegin(); iter != alloc_ops.rend(); iter++) {
-                auto alloc_op = *iter;
+                const auto *alloc_op = *iter;
                 auto type = alloc_op->type.with_lanes(1);
                 auto extents = alloc_op->extents;
                 extents.insert(extents.begin(), alloc_op->type.lanes());
@@ -1250,17 +1301,18 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     auto result = collect_stores.mutate(annotated_s);
     auto &stores = collect_stores.stores;
 
+    // collect bindings and run egglog
     std::vector<std::pair<std::string, std::string>> bindings;
-
     for (const auto &[name, op] : stores) {
         std::ostringstream oss;
         EqSatIRPrinter sprinter(oss);
         sprinter.print(op);
         bindings.emplace_back(name, oss.str());
     }
-
     auto output = run_egglog(std::move(bindings));
     auto optimized_programs = split_string(output, "\n");
+
+    // collect output of egglog
     bool amx_synthesized = false;
     std::map<std::string, Stmt> new_stores;
     for (size_t i = 0; i < optimized_programs.size(); ++i) {
@@ -1280,7 +1332,12 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     } else {
         std::cerr << "amx synthesized\n";
     }
-    result = EqSatExtensions::SubstStores(std::move(new_stores)).mutate(result);
+
+    // post-processing
+    EqSatExtensions::SubstStores subst_stores(std::move(new_stores));
+    result = subst_stores.mutate(result);
+    internal_assert(subst_stores.pending_definitions.empty());
+    std::cerr << result << "\n";
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);
     result = EqSatExtensions::DesugarIntrinsics().mutate(result);
@@ -1293,16 +1350,6 @@ Stmt post_process_wmma(const Stmt &s) {
 
 std::string run_egglog(std::vector<std::pair<std::string, std::string>> &&binding) {
 #include "egglog/main.tmpl.h"
-
-
-
-
-
-
-
-
-
-
 
 
 

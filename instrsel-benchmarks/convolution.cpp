@@ -17,7 +17,7 @@ bool matmul_bf16(Halide::Target target) {
     ImageParam A(Float(16), 1, "lhs");
     ImageParam B(Float(16), 2, "rhs");
 
-    RDom r(0, 16, "acc");
+    RDom r(0, 8, "acc");
 
     Func conv("conv");
 
@@ -33,8 +33,8 @@ bool matmul_bf16(Halide::Target target) {
     RVar mmri("mmri");
     Var xy("xy"), xyi("xyi");
 
-    int tile_x = 16;
-    int tile_y = 16;
+    int tile_x = 8;
+    int tile_y = 32;
 
     // A(x, y) = cast<float16_t>(A_input(x, y));
     // B(x, y) = cast<float16_t>(B_input(x, y));
