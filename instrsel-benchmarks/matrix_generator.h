@@ -16,7 +16,7 @@ template<typename T>
 void fill_buffer_flat_one(Buffer<T> &buf, int row, int acc) {
     for (int iy = 0; iy < row; ++iy) {
         for (int ix = 0; ix < acc; ++ix) {
-            T val = 1;
+            T val = T(1);
             buf(ix, iy) = val;
         }
     }

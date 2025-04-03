@@ -398,6 +398,8 @@ define weak_odr i32 @dp2a_u32_u32(<4 x i16> %a, <4 x i8> %b, i32 %i) nounwind re
        ret i32 %d
 }
 
+; https://github.com/JuliaGPU/CUDA.jl/blob/master/src/device/intrinsics/wmma.jl
+
 ; m16n16k16
 declare { <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half> } @llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p3i32(i8 addrspace(3)* nocapture readonly, i32)
 declare { <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half>, <2 x half> } @llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16.p3i32(i8 addrspace(3)* nocapture readonly, i32)

@@ -872,19 +872,25 @@ struct SubstStores : public EqSatIRMutator {
     }
 
     Stmt insert_pending_definitions(Stmt body) {
-        auto it = pending_definitions.begin();
-        while (it != pending_definitions.end()) {
-            auto &prologue = *it;
-            // Find the first place where not every variable is available.
-            if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
-                const int lanes = prologue.expr.type().lanes();
-                body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
-                it = pending_definitions.erase(it);
-            } else {
-                ++it;
-            }
+        // auto it = pending_definitions.begin();
+        // while (it != pending_definitions.end()) {
+        //     auto &prologue = *it;
+        //     // Find the first place where not every variable is available.
+        //     if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
+        //         const int lanes = prologue.expr.type().lanes();
+        //         body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
+        //         body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+        //         it = pending_definitions.erase(it);
+        //     } else {
+        //         ++it;
+        //     }
+        // }
+        for (auto &prologue: pending_definitions) {
+            const int lanes = prologue.expr.type().lanes();
+            body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
+            body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
         }
+        pending_definitions.clear();
         return body;
     }
 
@@ -893,7 +899,9 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-        body = insert_pending_definitions(body);
+        if (op->for_type == ForType::GPUBlock) {
+            body = insert_pending_definitions(body);
+        }
         return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
     }
 
@@ -902,7 +910,6 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-        body = insert_pending_definitions(body);
         return LetStmt::make(op->name, mutate(op->value), body);
     }
 
@@ -1103,6 +1110,20 @@ protected:
     }
 
     Expr visit(const Call *op) override {
+        // if (
+        //     op->name.find("load.a") != string::npos 
+        //     || 
+        //     op->name.find("load.b") != string::npos
+        // ) {
+        //     wmma_used = true;
+        //     return make_zero(Int(32, 8));
+
+        // } else 
+        // if (op->name.find("row.row") != string::npos) {
+        //     wmma_used = true;
+        //     return make_zero(Float(32, 8));
+
+        // } else 
         if (intrinsic_types.count(op->name)) {
             wmma_used = true;
             internal_assert(op->type.lanes() % 32 == 0);
@@ -1337,7 +1358,6 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     EqSatExtensions::SubstStores subst_stores(std::move(new_stores));
     result = subst_stores.mutate(result);
     internal_assert(subst_stores.pending_definitions.empty());
-    std::cerr << result << "\n";
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);
     result = EqSatExtensions::DesugarIntrinsics().mutate(result);

@@ -36,9 +36,6 @@ bool matmul_bf16(Halide::Target target) {
     int tile_x = 8;
     int tile_y = 32;
 
-    // A(x, y) = cast<float16_t>(A_input(x, y));
-    // B(x, y) = cast<float16_t>(B_input(x, y));
-
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x)) * cast<float>(B(x + r.x, y));
 
@@ -85,6 +82,31 @@ bool matmul_bf16(Halide::Target target) {
 
     result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
 
+
+    int row = 4096;
+    int col = 4096;
+    Buffer<float16_t> b_buf(acc, row);
+    fill_buffer_flat_one(b_buf, row, acc);
+    B.set(b_buf);
+
+    Buffer<float16_t> a_buf(16);
+    for (int i = 0; i < 16; i++) {
+        a_buf(i) = float16_t(fabs(8 - i));
+    }
+    A.set(a_buf);
+
+    // NB: if col is 7 (whcih it is supposed to be), then the CUDA kernel
+    // crashes with "misaligned address"
+    // This is another question to ask during the meeting that why the "residual"
+    // part is not computed outside of TensorCore.
+    Buffer<float> out(col - 16, row);
+    auto time = Tools::benchmark(5, 5, [&]() {
+        result.realize(out, target);
+        if (use_gpu) {
+            out.device_sync();
+        }
+    });
+
     std::cout << "Exec time: " << time << "\n";
     std::cout << "Success!\n";
     return true;
@@ -94,8 +116,8 @@ int main(int argc, char **argv) {
     freopen("/tmp/matmul_flat_1x1.log", "w", stderr);
     // Target target("x86-64-linux-avx512_sapphirerapids");
     // Target target("x86-64-linux-cuda_capability_70");
-    Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability70)
-        // .with_feature(Target::Debug)
+    Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability75)
+        .with_feature(Target::Debug)
         ;
     // Target target = get_jit_target_from_environment();
     std::cout << target;
