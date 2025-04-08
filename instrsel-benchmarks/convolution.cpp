@@ -11,13 +11,13 @@ using namespace Halide;
 bool matmul_bf16(Halide::Target target) {
     (void)target;
 
-    const int acc = 4096;
+    const int acc = 128;
 
     Var x("x"), y("y");
     ImageParam A(Float(16), 1, "lhs");
     ImageParam B(Float(16), 2, "rhs");
 
-    RDom r(0, 8, "acc");
+    RDom r(0, acc, "acc");
 
     Func conv("conv");
 
@@ -35,6 +35,7 @@ bool matmul_bf16(Halide::Target target) {
 
     int tile_x = 8;
     int tile_y = 32;
+    int tile_r = 8;
 
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x)) * cast<float>(B(x + r.x, y));
@@ -45,12 +46,17 @@ bool matmul_bf16(Halide::Target target) {
         .update()
         .split(x, x, rxi, tile_x)
         .split(y, y, ryi, tile_y)
+        .split(r.x, rro, rri, tile_r)
         // .split(r.x, rro, rri, tile_r)
         //
         // .split(rro, rro, rroo, 4)
-        .reorder({r.x, rxi, ryi, x, y})
+        //
+        // I have to unroll rro, since the temporary buffer refers to
+        // rro but is lifted to the host, where rro is not available.
+        .unroll(rro)
+        .reorder({rri, rxi, ryi, rro, x, y})
         .atomic()
-        .vectorize(r.x)
+        .vectorize(rri)
         .vectorize(rxi)
         .vectorize(ryi);
 
@@ -80,18 +86,19 @@ bool matmul_bf16(Halide::Target target) {
 
     Func result = conv.in();
 
-    result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
+    // result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
 
 
     int row = 4096;
     int col = 4096;
-    Buffer<float16_t> b_buf(acc, row);
-    fill_buffer_flat_one(b_buf, row, acc);
+    Buffer<float16_t> b_buf(col, row);
+    fill_buffer_flat(b_buf, row / 2, col / 2);
     B.set(b_buf);
 
-    Buffer<float16_t> a_buf(16);
-    for (int i = 0; i < 16; i++) {
-        a_buf(i) = float16_t(fabs(8 - i));
+    Buffer<float16_t> a_buf(acc);
+    for (int i = 0; i < acc; i++) {
+        // a_buf(i) = float16_t(fabs((acc / 2) - i));
+        a_buf(i) = float16_t(i);
     }
     A.set(a_buf);
 
@@ -99,13 +106,38 @@ bool matmul_bf16(Halide::Target target) {
     // crashes with "misaligned address"
     // This is another question to ask during the meeting that why the "residual"
     // part is not computed outside of TensorCore.
-    Buffer<float> out(col - 16, row);
+    Buffer<float> out(col - acc, row);
     auto time = Tools::benchmark(5, 5, [&]() {
         result.realize(out, target);
         if (use_gpu) {
             out.device_sync();
         }
     });
+
+    if (use_gpu) {
+        out.copy_to_host();
+    }
+
+    if (1) {
+        for (int j = 0; j < row; ++j) {
+        // for (int j = 0; j < 64; ++j) {
+            for (int i = 0; i < col - acc; ++i) {
+            // for (int i = 0; i < 64; ++i) {
+                // std::cerr << out(i, j) << " ";
+                float val = 0;
+                for (int k = 0; k < acc; ++k) {
+                    val += float(a_buf(k)) * float(b_buf(i + k, j));
+                }
+                if (fabs(val - out(i, j)) > 0.001) {
+                    std::cerr << "Invalid result at " << i << ", " << j << "\n"
+                              << out(i, j) << " != " << val << "\n";
+                    return false;
+                }
+            }
+            // std::cerr << "\n";
+        }
+    }
+
 
     std::cout << "Exec time: " << time << "\n";
     std::cout << "Success!\n";
@@ -117,7 +149,7 @@ int main(int argc, char **argv) {
     // Target target("x86-64-linux-avx512_sapphirerapids");
     // Target target("x86-64-linux-cuda_capability_70");
     Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability75)
-        .with_feature(Target::Debug)
+        // .with_feature(Target::Debug)
         ;
     // Target target = get_jit_target_from_environment();
     std::cout << target;

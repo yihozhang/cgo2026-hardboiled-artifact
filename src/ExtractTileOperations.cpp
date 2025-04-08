@@ -888,7 +888,7 @@ struct SubstStores : public EqSatIRMutator {
         for (auto &prologue: pending_definitions) {
             const int lanes = prologue.expr.type().lanes();
             body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-            body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+            body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
         }
         pending_definitions.clear();
         return body;
@@ -1059,12 +1059,12 @@ class EnforceWMMALanes : public IRMutator {
     std::map<string, MemoryType> tile_vars;
     std::map<string, Type> intrinsic_types = {
         {"wmma.load.a.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
-        {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
-        {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8)},
-        {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8)},
+        {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
+        {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
+        {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
     };
 
@@ -1121,7 +1121,7 @@ protected:
         // } else 
         // if (op->name.find("row.row") != string::npos) {
         //     wmma_used = true;
-        //     return make_zero(Float(32, 8));
+        //     return make_one(Float(32, 8));
 
         // } else 
         if (intrinsic_types.count(op->name)) {
@@ -1253,8 +1253,9 @@ protected:
             Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, *l1), {}, {}, const_true(*l1), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
-            for (int i = 0; i < *l2; i++) {
-                for (int j = 0; j < *l1 + *l2; j++) {
+            std::cerr << "ConvolutionShuffle: l1 = " << *l1 << ", l2 = " << *l2 << "\n";
+            for (int j = 0; j < *l1 + *l2; j++) {
+                for (int i = 0; i < *l2; i++) {
                     if (0 <= j - i && j - i < *l1) {
                         indices.push_back(j - i);
                     } else {

@@ -257,14 +257,6 @@
                 )
                 mat))
 
-    ; (extract new-l1)
-    ; (extract l2)
-    ; (extract l3)
-    ; (extract new-e)
-    ; (extract s2)
-    ; (extract s1a)
-    ; (extract new-e)
-    ; (panic "?")
     (union e new-e)
 ))
 
