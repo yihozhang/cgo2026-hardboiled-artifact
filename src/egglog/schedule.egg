@@ -8,9 +8,10 @@
         (saturate (run typechecking))
         (run)
         (run amx)))
-(run-schedule (saturate 
-    (saturate (run typechecking))
-    (run push-down-vector-reduce)))
+;; These are not currently used
+; (run-schedule (saturate 
+;     (saturate (run typechecking))
+;     (run push-down-vector-reduce)))
 
 ; (keep-best __INPUTS__ "AMXShape" "AMXAllocation" "WMMAShape" "WMMAAllocation" "CommBop" "AddOrSub")
 

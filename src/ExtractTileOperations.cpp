@@ -872,25 +872,27 @@ struct SubstStores : public EqSatIRMutator {
     }
 
     Stmt insert_pending_definitions(Stmt body) {
-        // auto it = pending_definitions.begin();
-        // while (it != pending_definitions.end()) {
-        //     auto &prologue = *it;
-        //     // Find the first place where not every variable is available.
-        //     if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
-        //         const int lanes = prologue.expr.type().lanes();
-        //         body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-        //         body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
-        //         it = pending_definitions.erase(it);
-        //     } else {
-        //         ++it;
-        //     }
-        // }
-        for (auto &prologue: pending_definitions) {
-            const int lanes = prologue.expr.type().lanes();
-            body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-            body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+        auto it = pending_definitions.begin();
+        while (it != pending_definitions.end()) {
+            auto &prologue = *it;
+            // Find the first place where not every variable is available.
+            if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
+                const int lanes = prologue.expr.type().lanes();
+                body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
+                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+                it = pending_definitions.erase(it);
+            } else {
+                ++it;
+            }
         }
-        pending_definitions.clear();
+
+        // for (auto &prologue: pending_definitions) {
+        //     const int lanes = prologue.expr.type().lanes();
+        //     body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
+        //     body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+        // }
+        // pending_definitions.clear();
+        
         return body;
     }
 
@@ -899,9 +901,9 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-        if (op->for_type == ForType::GPUBlock) {
-            body = insert_pending_definitions(body);
-        }
+        // if (op->for_type == ForType::GPUBlock) {
+        body = insert_pending_definitions(body);
+        // }
         return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
     }
 
@@ -910,6 +912,7 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
+        body = insert_pending_definitions(body);
         return LetStmt::make(op->name, mutate(op->value), body);
     }
 
