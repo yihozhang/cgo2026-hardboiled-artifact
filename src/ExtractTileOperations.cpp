@@ -6,6 +6,7 @@
 #include "IRMatch.h"
 #include "IRMutator.h"
 #include "IROperator.h"
+#include "Simplify.h"
 #include "Util.h"
 #include <cstdio>
 #include <cstdlib>
@@ -879,7 +880,7 @@ struct SubstStores : public EqSatIRMutator {
             if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
                 const int lanes = prologue.expr.type().lanes();
                 body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Heap, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
                 it = pending_definitions.erase(it);
             } else {
                 ++it;
@@ -1071,21 +1072,15 @@ class EnforceWMMALanes : public IRMutator {
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
     };
 
-    int get_nth_tile_from_tile_index_wmma(const Expr &e) {
+    Expr get_nth_tile_from_tile_index_wmma(const Expr &e) {
         const Ramp *ramp = e.as<Ramp>();
         if (!ramp) {
             internal_error << "WMMA tile can only be indexed with ramp";
             return -1;
         }
         int vec_length = ramp->lanes;
-        const int64_t *basep = as_const_int(ramp->base);
-        if (!basep) {
-            internal_error << "Only constant base is supported in WMMA, get " << ramp->base;
-            return -1;
-        }
-        int base = (int)*basep;
-        internal_assert(base % vec_length == 0) << "Cannot determine which WMMA tile to load from";
-        return base / vec_length;
+        internal_assert(can_prove(ramp->base % vec_length == 0)) << "Cannot determine which WMMA tile to load from";
+        return ramp->base / vec_length;
     }
 
 protected:
@@ -1154,7 +1149,7 @@ protected:
         auto it = tile_vars.find(load->name);
         if (it != tile_vars.end()) {
             internal_assert(load->type.lanes() % 32 == 0);
-            int nth = get_nth_tile_from_tile_index_wmma(load->index);
+            auto nth = get_nth_tile_from_tile_index_wmma(load->index);
             int tile_lanes = load->type.lanes() / 32;
             MemoryType mt = it->second;
             Type tile_type = mt == MemoryType::WMMAAccumulator ? Float(32, tile_lanes) : Int(32, tile_lanes);
@@ -1186,7 +1181,7 @@ protected:
             internal_assert(is_const_one(store->predicate)) << "Only constant predicate is supported";
             internal_assert(store->value.type().lanes() % 32 == 0);
             int tile_lanes = store->value.type().lanes() / 32;
-            int nth = get_nth_tile_from_tile_index_wmma(store->index);
+            auto nth = get_nth_tile_from_tile_index_wmma(store->index);
 
             // There should not be a Load in places other than value,
             // so we don't need to mutate them.
