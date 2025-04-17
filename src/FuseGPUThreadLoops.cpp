@@ -1358,6 +1358,9 @@ class InjectThreadBarriers : public IRMutator {
         case MemoryType::Register:
         case MemoryType::LockedCache:
         case MemoryType::VTCM:
+        case MemoryType::WMMAA:
+        case MemoryType::WMMAB:
+        case MemoryType::WMMAAccumulator:
         case MemoryType::AMXTile:
             break;
         }
@@ -1383,6 +1386,9 @@ class InjectThreadBarriers : public IRMutator {
         case MemoryType::Register:
         case MemoryType::LockedCache:
         case MemoryType::VTCM:
+        case MemoryType::WMMAA:
+        case MemoryType::WMMAB:
+        case MemoryType::WMMAAccumulator:
         case MemoryType::AMXTile:
             break;
         }

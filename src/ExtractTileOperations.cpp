@@ -1251,7 +1251,6 @@ protected:
             Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, *l1), {}, {}, const_true(*l1), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
-            std::cerr << "ConvolutionShuffle: l1 = " << *l1 << ", l2 = " << *l2 << "\n";
             for (int j = 0; j < *l1 + *l2; j++) {
                 for (int i = 0; i < *l2; i++) {
                     if (0 <= j - i && j - i < *l1) {

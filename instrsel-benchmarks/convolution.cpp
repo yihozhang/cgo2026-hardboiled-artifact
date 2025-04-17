@@ -33,15 +33,15 @@ bool conv1d(Halide::Target target) {
     RVar mmri("mmri");
     Var xy("xy"), xyi("xyi");
 
-    int tile_x = 8;
-    int tile_y = 32;
-    int tile_r = 8;
-
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x)) * cast<float>(B(x + r.x, y));
 
     int schedule = 0;
     if (schedule == 0) {
+        int tile_x = 8;
+        int tile_y = 32;
+        int tile_r = 8;
+
         // update
         conv.compute_at(conv.in(), x)
             .store_in(MemoryType::WMMAAccumulator)
@@ -81,51 +81,44 @@ bool conv1d(Halide::Target target) {
             .unroll(yi)
             .vectorize(mmxi)
             .vectorize(mmyi);
-    } else if(schedule == 1) {
+    } else if (schedule == 1) {
+
+        int tile_x = 4;
+        int tile_y = 2;
+        int tile_r = 4;
 
         // update
-        conv.compute_at(conv.in(), mmxi)
-            // .store_in(MemoryType::WMMAAccumulator)
-            // .update()
-            // .split(x, x, rxi, tile_x)
-            // .split(y, y, ryi, tile_y)
-            // .split(r.x, rro, rri, tile_r)
-            // .split(r.x, rro, rri, tile_r)
-            //
-            // .split(rro, rro, rroo, 4)
-            //
-            // I have to unroll rro, since the temporary buffer refers to
-            // rro but is lifted to the host, where rro is not available.
-            // .unroll(rro)
-            // .reorder({rri, rxi, ryi, x, y, rro})
-            // .gpu_threads(rxi)
-            // .gpu_threads(ryi)
-            ;
-
-        // initialization
-        // conv.split(x, x, rxi, tile_x)
-        //     .split(y, y, ryi, tile_y)
-        //     // .gpu_threads(rxi)
-        //     // .gpu_threads(ryi)
-        //     .unroll(y);
-
+        conv.compute_at(conv.in(), xi)
+            .update()
+            .split(x, x, mmxi, tile_x)
+            .split(y, y, mmyi, tile_y)
+            .split(r.x, rro, rri, tile_r)
+            .reorder({rri, mmxi, mmyi, rro, x, y})
+            .atomic()
+            .unroll(rri);
+        conv
+            .split(x, x, mmxi, tile_x)
+            .split(y, y, mmyi, tile_y)
+            .reorder(mmxi, mmyi, x, y)
+            .atomic()
+            .vectorize(mmxi)
+            .vectorize(mmyi);
         conv.in()
-            .split(x, x, xi, tile_x)
+            .split(x, x, xi, tile_x * 16)
             .split(xi, xi, mmxi, tile_x)
             .split(y, y, yi, tile_y * 16)
             .split(yi, yi, mmyi, tile_y)
-            .gpu_blocks(x, y)
             .reorder({mmxi, mmyi, xi, yi, x, y})
-            // .unroll(xi)
-            // .unroll(yi)
-            .gpu_threads(mmxi)
-            .gpu_threads(mmyi);
+            .gpu_blocks(x, y)
+            .gpu_threads(xi, yi)
+            .unroll(mmxi)
+            .unroll(mmyi)
+            ;
     }
 
     Func result = conv.in();
 
     // result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
-
 
     int row = 4096;
     int col = 4096;
@@ -143,8 +136,8 @@ bool conv1d(Halide::Target target) {
     // crashes with "misaligned address"
     // This is another question to ask during the meeting that why the "residual"
     // part is not computed outside of TensorCore.
+    // Buffer<float> out(col - acc, row);
     Buffer<float> out(col - acc, row);
-    // Buffer<float> out(col - acc + 4, row);
     // out.crop(0, 0, col - acc + 1);
     auto time = Tools::benchmark(5, 5, [&]() {
         result.realize(out, target);
@@ -159,9 +152,9 @@ bool conv1d(Halide::Target target) {
 
     if (1) {
         for (int j = 0; j < row; ++j) {
-        // for (int j = 0; j < 64; ++j) {
+            // for (int j = 0; j < 64; ++j) {
             for (int i = 0; i < col - acc; ++i) {
-            // for (int i = 0; i < 64; ++i) {
+                // for (int i = 0; i < 64; ++i) {
                 // std::cerr << out(i, j) << " ";
                 float val = 0;
                 for (int k = 0; k < acc; ++k) {
@@ -177,12 +170,10 @@ bool conv1d(Halide::Target target) {
         }
     }
 
-
     std::cout << "Exec time: " << time << "\n";
     std::cout << "Success!\n";
     return true;
 }
-
 
 bool conv2d(Halide::Target target) {
     (void)target;
@@ -307,12 +298,10 @@ bool conv2d(Halide::Target target) {
         }
     }
 
-
     std::cout << "Exec time: " << time << "\n";
     std::cout << "Success!\n";
     return true;
 }
-
 
 int main(int argc, char **argv) {
     freopen("/tmp/matmul_flat_1x1.log", "w", stderr);
