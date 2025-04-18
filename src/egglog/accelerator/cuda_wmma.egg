@@ -184,8 +184,7 @@
 
     (WMMATileB (Tile _l m-lanes n-lanes) wmma-intrinsic)
 ) (
-    ;; TODO: n-stride is not utilized. This can be a soundness bug
-    (let new-e (Call wmma-intrinsic ty (vec-of (Var (Handle 1) name) base (IntImm32 0))))
+    (let new-e (Call wmma-intrinsic ty (vec-of (Var (Handle 1) name) base n-stride)))
     (union e new-e)
 ))
 

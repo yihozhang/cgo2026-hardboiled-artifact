@@ -35,9 +35,14 @@ bool conv1d(Halide::Target target) {
 
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x)) * cast<float>(B(x + r.x, y));
+    // conv(x, y) += A(u-x) * B(u, y)
+    // conv(x, y) += A'(x, u) * B(u, y)
+    // 8 x 32 x 16
 
-    int schedule = 0;
+
+    int schedule = 2;
     if (schedule == 0) {
+        // naive WMMA schedule
         int tile_x = 8;
         int tile_y = 32;
         int tile_r = 8;
@@ -49,11 +54,7 @@ bool conv1d(Halide::Target target) {
             .split(x, x, rxi, tile_x)
             .split(y, y, ryi, tile_y)
             .split(r.x, rro, rri, tile_r)
-            // .split(r.x, rro, rri, tile_r)
-            //
-            // .split(rro, rro, rroo, 4)
-            //
-            // I have to unroll rro, since the temporary buffer refers to
+            // I cannot unroll rro, since the temporary buffer refers to
             // rro but is lifted to the host, where rro is not available.
             // .unroll(rro)
             .unroll(y)
@@ -71,9 +72,9 @@ bool conv1d(Halide::Target target) {
             .unroll(y);
 
         conv.in()
-            .split(x, x, xi, tile_x)
+            .split(x, x, xi, tile_x * 1)
             .split(xi, xi, mmxi, tile_x)
-            .split(y, y, yi, tile_y * 8)
+            .split(y, y, yi, tile_y * 2)
             .split(yi, yi, mmyi, tile_y)
             .gpu_blocks(x, y)
             .reorder({mmxi, mmyi, xi, yi, x, y})
@@ -82,38 +83,45 @@ bool conv1d(Halide::Target target) {
             .vectorize(mmxi)
             .vectorize(mmyi);
     } else if (schedule == 1) {
-
-        int tile_x = 4;
-        int tile_y = 2;
-        int tile_r = 4;
+        int tile_x = 8;
+        int tile_y = 32;
+        int tile_r = 8;
 
         // update
-        conv.compute_at(conv.in(), xi)
+        conv.compute_at(conv.in(), x)
+            .store_in(MemoryType::WMMAAccumulator)
             .update()
-            .split(x, x, mmxi, tile_x)
-            .split(y, y, mmyi, tile_y)
+            .split(x, x, rxi, tile_x)
+            .split(y, y, ryi, tile_y)
             .split(r.x, rro, rri, tile_r)
-            .reorder({rri, mmxi, mmyi, rro, x, y})
+            // I cannot unroll rro, since the temporary buffer refers to
+            // rro but is lifted to the host, where rro is not available.
+            // .unroll(rro)
+            .unroll(y)
+            .reorder({rri, rxi, ryi, x, y, rro})
             .atomic()
-            .unroll(rri);
-        conv
-            .split(x, x, mmxi, tile_x)
-            .split(y, y, mmyi, tile_y)
-            .reorder(mmxi, mmyi, x, y)
-            .atomic()
+            .vectorize(rri)
+            .vectorize(rxi)
+            .vectorize(ryi);
+        B.in().compute_at(conv, x).store_in(MemoryType::WMMAA).vectorize(_0).vectorize(_1);
+        // initialization
+        conv.split(x, x, rxi, tile_x)
+            .split(y, y, ryi, tile_y)
+            .vectorize(rxi)
+            .vectorize(ryi)
+            .unroll(y);
+
+        conv.in()
+            .split(x, x, xi, tile_x * 1)
+            .split(xi, xi, mmxi, tile_x)
+            .split(y, y, yi, tile_y * 2)
+            .split(yi, yi, mmyi, tile_y)
+            .gpu_blocks(x, y)
+            .reorder({mmxi, mmyi, xi, yi, x, y})
+            .unroll(xi)
+            .unroll(yi)
             .vectorize(mmxi)
             .vectorize(mmyi);
-        conv.in()
-            .split(x, x, xi, tile_x * 16)
-            .split(xi, xi, mmxi, tile_x)
-            .split(y, y, yi, tile_y * 16)
-            .split(yi, yi, mmyi, tile_y)
-            .reorder({mmxi, mmyi, xi, yi, x, y})
-            .gpu_blocks(x, y)
-            .gpu_threads(xi, yi)
-            .unroll(mmxi)
-            .unroll(mmyi)
-            ;
     }
 
     Func result = conv.in();
@@ -193,58 +201,92 @@ bool conv2d(Halide::Target target) {
     use_gpu = true;
 
     Var xi("xi"), yi("yi");
-    Var rxi("rxi"), ryi("ryi");
-    RVar rri("rri"), rro("rro"), rroo("rroo");
+    RVar rxi("rxi"), ryi("ryi");
     Var mmxi("mmxi"),
         mmyi("mmyi");
     RVar mmri("mmri");
     Var xy("xy"), xyi("xyi");
 
-    int tile_x = 8;
-    int tile_y = 32;
-    int tile_r = 8;
 
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x, r.y)) * cast<float>(B(x + r.x, y + r.y));
 
-    // update
-    conv.compute_at(conv.in(), x)
-        .store_in(MemoryType::WMMAAccumulator)
-        .update()
-        .split(x, x, rxi, tile_x)
-        .split(y, y, ryi, tile_y)
-        .split(r.x, rro, rri, tile_r)
-        // .split(r.x, rro, rri, tile_r)
-        //
-        // .split(rro, rro, rroo, 4)
-        //
-        // I have to unroll rro, since the temporary buffer refers to
-        // rro but is lifted to the host, where rro is not available.
-        // .unroll(rro)
-        .reorder({rri, rxi, ryi, rro, r.y, x, y})
-        .atomic()
-        .vectorize(rri)
-        .vectorize(rxi)
-        .vectorize(ryi);
+    int schedule = 0;
+    if (schedule == 0) {
+        int tile_x = 8;
+        int tile_y = 32;
+        int tile_rx = 8;
+        int tile_ry = 1;
 
-    // initialization
-    conv.split(x, x, rxi, tile_x)
-        .split(y, y, ryi, tile_y)
-        .vectorize(rxi)
-        .vectorize(ryi)
-        .unroll(y);
+        // Can't do this because this is scheduling A, not the matrix for A
+        // A.in().compute_at(conv, x).store_in(MemoryType::WMMAA);
+        // update
+        conv.compute_at(conv.in(), x)
+            .store_in(MemoryType::WMMAAccumulator)
+            .update()
+            .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+            .tile(r.x, r.y, rxi, ryi, tile_rx, tile_ry)
+            .reorder({rxi, mmxi, mmyi, ryi, r.x, r.y, x, y})
+            // .unroll(x)
+            // .unroll(y)
+            // .unroll(r.x)
+            // .unroll(ryi)
+            .unroll(ryi)
+            // .unroll(r.x)
+            .atomic()
+            .vectorize(rxi)
+            .vectorize(mmxi)
+            .vectorize(mmyi);
 
-    conv.in()
-        .split(x, x, xi, tile_x)
-        .split(xi, xi, mmxi, tile_x)
-        .split(y, y, yi, tile_y)
-        .split(yi, yi, mmyi, tile_y)
-        .gpu_blocks(x, y)
-        .reorder({mmxi, mmyi, xi, yi, x, y})
-        .unroll(xi)
-        .unroll(yi)
-        .vectorize(mmxi)
-        .vectorize(mmyi);
+        // initialization
+        conv.split(x, x, mmxi, tile_x)
+            .split(y, y, mmyi, tile_y)
+            .vectorize(mmxi)
+            .vectorize(mmyi)
+            .unroll(y);
+
+        conv.in()
+            .split(x, x, xi, tile_x)
+            .split(xi, xi, mmxi, tile_x)
+            .split(y, y, yi, tile_y)
+            .split(yi, yi, mmyi, tile_y)
+            .gpu_blocks(x, y)
+            .reorder({mmxi, mmyi, xi, yi, x, y})
+            .unroll(xi)
+            .unroll(yi)
+            .vectorize(mmxi)
+            .vectorize(mmyi);
+    } else if (schedule == 1) {
+        int tile_x = 4;
+        int tile_y = 4;
+        int tile_rx = 4;
+        int tile_ry = 4;
+
+        // update
+        conv.compute_at(conv.in(), xi)
+            .update()
+            .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+            .tile(r.x, r.y, rxi, ryi, tile_rx, tile_ry)
+            .reorder({ rxi, ryi, mmxi, mmyi, r.x, r.y, x, y})
+            .atomic()
+            .unroll(rxi)
+            .unroll(ryi)
+            ;
+        conv
+            .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+            .reorder(mmxi, mmyi, x, y)
+            .atomic()
+            .vectorize(mmxi)
+            .vectorize(mmyi);
+        conv.in()
+            .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+            .gpu_tile(x, y, xi, yi, 16, 16)
+            .reorder({mmxi, mmyi, xi, yi, x, y})
+            .gpu_blocks(x, y)
+            .gpu_threads(xi, yi)
+            .unroll(mmxi)
+            .unroll(mmyi);
+    }
 
     Func result = conv.in();
 
@@ -311,9 +353,9 @@ int main(int argc, char **argv) {
     // Target target = get_jit_target_from_environment();
     std::cout << target;
 
-    printf("Running convolution 1d \n");
-    conv1d(target);
-    // printf("Running convolution 3d \n");
-    // conv2d(target);
+    // printf("Running convolution 1d \n");
+    // conv1d(target);
+    printf("Running convolution 2d \n");
+    conv2d(target);
     return 0;
 }
