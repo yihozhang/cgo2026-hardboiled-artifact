@@ -14,8 +14,8 @@
 (WMMATileB (Tile 32 8 16) "wmma.load.b.sync.aligned.row.m32n8k16.f16")
 (relation WMMATileC (WMMATileConfig String i64))
 (WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f32" 32)
+(WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f16" 16)
 (WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f32" 32)
-(WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f16" 16)
 (relation WMMAGEMM (WMMATileConfig String i64))
 (WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32" 32)
 (WMMAGEMM (Tile 32 8 16) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32" 32)
@@ -139,6 +139,38 @@
         (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs new-mat)))
         (WMMAShape new-e x-lanes y-lanes)
 
+        (union e (WMMA2Mem new-e))
+    ))
+
+(rule (
+        (= e 
+                (VectorReduce (Float acc-bits out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float acc-bits tot-lanes) lhs)
+                        (Cast (Float acc-bits tot-lanes) rhs))
+                ))
+        (= out-lanes (* x-lanes y-lanes))
+        (= tot-lanes (* out-lanes r-lanes))
+
+        (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+        (= lhs-index
+            (Ramp (Broadcast (Ramp lhs-base (IntImm32 1) r-lanes) y-lanes)
+                (Broadcast x-stride (* y-lanes r-lanes))
+                x-lanes)
+        )
+
+        (= tile (Tile x-lanes y-lanes r-lanes))
+        (wmma-f16-rhs rhs tile new-rhs)
+
+        (WMMATileA tile intrinsic-A)
+        (WMMAGEMM tile intrinsic-GEMM acc-bits)
+        (WMMATileC tile intrinsic-C acc-bits)
+
+    ) (
+        (let initial (Call (+ intrinsic-C ".ZERO") (Float acc-bits 256) (vec-of (IntImm32 0))))
+        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs initial)))
+        (WMMAShape new-e x-lanes y-lanes)
         (union e (WMMA2Mem new-e))
     ))
 

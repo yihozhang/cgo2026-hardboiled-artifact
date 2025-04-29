@@ -251,6 +251,26 @@
     ) Expr
     :unextractable)
 
+(function matrix-multiplication-float-16-cont (
+    ;; lhs-name
+    Variable
+    ;; rhs-name
+    Variable
+    ;; out-lanes
+    i64
+    ;; tot-lanes
+    i64
+    ;; broadcast-per
+    i64
+    ;; multiplicity
+    i64
+    ;; lhs
+    Expr
+    ;; rhs
+    Expr
+    ) Expr
+    :unextractable)
+
 (rewrite (matrix-multiplication-int/uint-cont signed lhs-name rhs-name old-out-lanes old-tot-lanes broadcast-per m lhs-idx rhs-idx)
          ;; (/ tot-lanes out-lanes) computes how many values are reduced into one value
          ;; We divide broadcast-per by this to account for the actual broadcasting after reduction
@@ -285,6 +305,19 @@
     :ruleset assemble
     )
 
+(rewrite (matrix-multiplication-float-16-cont lhs-name rhs-name old-out-lanes old-tot-lanes broadcast-per m lhs-idx rhs-idx)
+         (BroadcastPer (/ broadcast-per (/ tot-lanes out-lanes))
+            (VectorReduce (Float 16 out-lanes) (Add)
+                (Bop (Mul)
+                    (Load (Float 16 tot-lanes) lhs-name lhs-idx)
+                    (Load (Float 16 tot-lanes) rhs-name rhs-idx)))
+            m
+         )
+    :when ((= out-lanes (/ old-out-lanes m))
+           (= tot-lanes (/ old-tot-lanes m)))
+    :ruleset assemble
+    )
+
 (rule (
     (= e (VectorReduce (UIntOrInt signed 32 out-lanes) (Add)
         (Bop (Mul)
@@ -305,6 +338,17 @@
     (= rhs (Load (BFloat 16 tot-lanes) rhs-name rhs-idx))
 ) (
     (remove-aligned-bc e (unstable-fn "matrix-multiplication-float-cont" lhs-name rhs-name out-lanes tot-lanes) lhs-idx rhs-idx)
+) :ruleset canonicalize)
+
+(rule (
+    (= e (VectorReduce (Float 16 out-lanes) (Add)
+        (Bop (Mul)
+            lhs
+            rhs)))
+    (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-idx))
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-idx))
+) (
+    (remove-aligned-bc e (unstable-fn "matrix-multiplication-float-16-cont" lhs-name rhs-name out-lanes tot-lanes) lhs-idx rhs-idx)
 ) :ruleset canonicalize)
 
 
