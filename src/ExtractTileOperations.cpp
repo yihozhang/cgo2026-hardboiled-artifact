@@ -729,7 +729,7 @@ protected:
             user_assert(vars_memory_type.find(op->name) == vars_memory_type.end()) << "Duplicate variable name: " << op->name;
 
         } else if (op->memory_type == MemoryType::WMMAAccumulator) {
-            user_assert(op->type.is_float() && op->type.bits() == 32) << "currently only support float16xfloat16 to float32 for WMMA";
+            user_assert(op->type.is_float() && (op->type.bits() == 32 || op->type.bits() == 16)) << "currently only support float16xfloat16 to float32 for WMMA";
 
         } else if (op->memory_type != MemoryType::WMMAA && op->memory_type != MemoryType::WMMAB) {
             return IRMutator::visit(op);

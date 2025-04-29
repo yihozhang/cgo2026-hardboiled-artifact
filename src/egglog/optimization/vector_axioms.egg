@@ -170,4 +170,12 @@
          (Ramp (Ramp e (IntImm b 1) 2) (Broadcast (IntImm b 2) 2) (/ l 2)) 
   :when ((= 0 (% l 2))))
 
+;; Cast identity
+(rule (
+    (has-type e t)
+) (
+    (union e (Cast t e))
+))
+
+
 ; )***"; prog += "\n";

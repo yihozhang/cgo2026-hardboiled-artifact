@@ -19,7 +19,7 @@
     (!= b1 1)
 ) (
     (union (Broadcast e2 b2) (Broadcast (Broadcast e2 (/ b2 b1)) b1))
-    (subsume (Broadcast e2 b2))
+    ; (subsume (Broadcast e2 b2))
 ) :ruleset canonicalize)
 
 (rule (
@@ -29,7 +29,7 @@
     (!= l1 1)
 ) (
     (union (Broadcast e2 b2) (Broadcast (Broadcast e2 (/ b2 l1)) l1))
-    (subsume (Broadcast e2 b2))
+    ; (subsume (Broadcast e2 b2))
 ) :ruleset canonicalize)
 
 (rule (
@@ -42,9 +42,9 @@
 ) (
     (union (Ramp e2 s2 l2) 
            (Ramp (Ramp e2 s2 (/ l2 b1))
-                 (Bop (Mul) s2 (Broadcast (UIntOrIntImm sign bits (/ l2 b1)) lanes))
+                 (Broadcast (Bop (Mul) s2 (Broadcast (UIntOrIntImm sign bits (/ l2 b1)) lanes)) (/ l2 b1))
                  b1))
-    (subsume (Ramp e2 s2 l2))
+    ; (subsume (Ramp e2 s2 l2))
 ) :ruleset canonicalize)
 
 (rule (
@@ -59,7 +59,7 @@
            (Ramp (Ramp e2 s2 (/ l2 l1))
                  (Bop (Mul) s2 (Broadcast (UIntOrIntImm sign bits (/ l2 l1)) lanes))
                  l1))
-    (subsume (Ramp e2 s2 l2))
+    ; (subsume (Ramp e2 s2 l2))
 ) :ruleset canonicalize)
 
 ;; Propagating down make-aligned
@@ -85,23 +85,12 @@
 
 ;; Instantiation of make-aligned for general matrix multiplication
 (rule (
-    (= e (VectorReduce (UIntOrInt signed 32 out-lanes) (Add)
+    (= e (VectorReduce out-type (Add)
         (Bop (Mul)
-            (Cast (UIntOrInt signed 32 tot-lanes) lhs)
-            (Cast (UIntOrInt signed 32 tot-lanes) rhs))))
-    (= lhs (Load (UIntOrInt signed 8 tot-lanes) lhs-name lhs-idx))
-    (= rhs (Load (UIntOrInt signed 8 tot-lanes) rhs-name rhs-idx))
-) (
-    (make-aligned lhs-idx rhs-idx)
-) :ruleset canonicalize)
-
-(rule (
-    (= e (VectorReduce (Float 32 out-lanes) (Add)
-        (Bop (Mul)
-            (Cast (Float 32 tot-lanes) lhs)
-            (Cast (Float 32 tot-lanes) rhs))))
-    (= lhs (Load (BFloat 16 tot-lanes) lhs-name lhs-idx))
-    (= rhs (Load (BFloat 16 tot-lanes) rhs-name rhs-idx))
+            (Cast lhs-op-type lhs)
+            (Cast rhs-op-type rhs))))
+    (= lhs (Load lhs-type lhs-name lhs-idx))
+    (= rhs (Load rhs-type rhs-name rhs-idx))
 ) (
     (make-aligned lhs-idx rhs-idx)
 ) :ruleset canonicalize)

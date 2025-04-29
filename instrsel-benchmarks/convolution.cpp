@@ -211,7 +211,7 @@ bool conv2d(Halide::Target target) {
     conv(x, y) = cast<float>(0);
     conv(x, y) += cast<float>(A(r.x, r.y)) * cast<float>(B(x + r.x, y + r.y));
 
-    int schedule = 0;
+    int schedule = 1;
     if (schedule == 0) {
         int tile_x = 8;
         int tile_y = 32;
@@ -227,12 +227,7 @@ bool conv2d(Halide::Target target) {
             .tile(x, y, mmxi, mmyi, tile_x, tile_y)
             .tile(r.x, r.y, rxi, ryi, tile_rx, tile_ry)
             .reorder({rxi, mmxi, mmyi, ryi, r.x, r.y, x, y})
-            // .unroll(x)
-            // .unroll(y)
-            // .unroll(r.x)
-            // .unroll(ryi)
             .unroll(ryi)
-            // .unroll(r.x)
             .atomic()
             .vectorize(rxi)
             .vectorize(mmxi)
@@ -268,16 +263,14 @@ bool conv2d(Halide::Target target) {
             .tile(x, y, mmxi, mmyi, tile_x, tile_y)
             .tile(r.x, r.y, rxi, ryi, tile_rx, tile_ry)
             .reorder({ rxi, ryi, mmxi, mmyi, r.x, r.y, x, y})
-            .atomic()
             .unroll(rxi)
             .unroll(ryi)
             ;
         conv
             .tile(x, y, mmxi, mmyi, tile_x, tile_y)
             .reorder(mmxi, mmyi, x, y)
-            .atomic()
-            .vectorize(mmxi)
-            .vectorize(mmyi);
+            .unroll(mmxi)
+            .unroll(mmyi);
         conv.in()
             .tile(x, y, mmxi, mmyi, tile_x, tile_y)
             .gpu_tile(x, y, xi, yi, 16, 16)

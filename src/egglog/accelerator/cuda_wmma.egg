@@ -12,15 +12,18 @@
 (relation WMMATileB (WMMATileConfig String))
 (WMMATileB (Tile 16 16 16) "wmma.load.b.sync.aligned.row.m16n16k16.f16")
 (WMMATileB (Tile 32 8 16) "wmma.load.b.sync.aligned.row.m32n8k16.f16")
-(relation WMMATileC (WMMATileConfig String))
-(WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f32")
-(WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f32")
-(relation WMMAGEMM (WMMATileConfig String))
-(WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32")
-(WMMAGEMM (Tile 32 8 16) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32")
-(relation WMMATileD (WMMATileConfig String))
-(WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f32")
-(WMMATileD (Tile 32 8 16) "wmma.store.d.sync.aligned.row.m32n8k16.f32")
+(relation WMMATileC (WMMATileConfig String i64))
+(WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f32" 32)
+(WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f32" 32)
+(WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f16" 16)
+(relation WMMAGEMM (WMMATileConfig String i64))
+(WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32" 32)
+(WMMAGEMM (Tile 32 8 16) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32" 32)
+(WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16" 16)
+(relation WMMATileD (WMMATileConfig String i64))
+(WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f32" 32)
+(WMMATileD (Tile 32 8 16) "wmma.store.d.sync.aligned.row.m32n8k16.f32" 32)
+(WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f16" 16)
 
 
 ;; different from WMMA, the last column denotes number of elements rather than colbytes
@@ -108,10 +111,10 @@
 
 (rule (
         (= e (Bop (Add)
-                (VectorReduce (Float 32 out-lanes) (Add)
+                (VectorReduce (Float acc-bits out-lanes) (Add)
                     (Bop (Mul)
-                        (Cast (Float 32 tot-lanes) lhs)
-                        (Cast (Float 32 tot-lanes) rhs))
+                        (Cast (Float acc-bits tot-lanes) lhs)
+                        (Cast (Float acc-bits tot-lanes) rhs))
                 )
                 mat))
         (= out-lanes (* x-lanes y-lanes))
@@ -128,12 +131,12 @@
         (wmma-f16-rhs rhs tile new-rhs)
 
         (WMMATileA tile intrinsic-A)
-        (WMMAGEMM tile intrinsic-GEMM)
+        (WMMAGEMM tile intrinsic-GEMM acc-bits)
 
     ) (
         (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
         (let new-mat (Mem2WMMA mat))
-        (let new-e (Call intrinsic-GEMM (Float 32 256) (vec-of new-lhs new-rhs new-mat)))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs new-mat)))
         (WMMAShape new-e x-lanes y-lanes)
 
         (union e (WMMA2Mem new-e))
@@ -143,15 +146,15 @@
 (rule (
         (= e (Mem2WMMA
                 (Broadcast
-                    (FloatImm 32 0.0)
+                    (FloatImm bits 0.0)
                     lanes
                 )))
         (WMMAShape e rows cols)
         (= lanes (* rows cols))
 
-        (WMMATileC (Tile rows cols _k) intrinsic)
+        (WMMATileC (Tile rows cols _k) intrinsic bits)
     ) (
-        (let new-e (Call (+ intrinsic ".ZERO") (Float 32 lanes) (vec-of (IntImm32 0))))
+        (let new-e (Call (+ intrinsic ".ZERO") (Float bits lanes) (vec-of (IntImm32 0))))
         ; (let new-e (Call intrinsic (Float 32 lanes) (vec-of (Var (Handle 1) (ExprVar (Mem) 
         (union e new-e)
     ))
@@ -159,9 +162,9 @@
 (rule (
         (= s (Store store-name (WMMA2Mem tile) index))
         (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
-        (has-type value ty)
+        (has-type tile (Float bits _lanes))
 
-        (WMMATileD (Tile n-lanes m-lanes _k) intrinsic)
+        (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
     ) (
         (let new-s (Evaluate
                 (Call intrinsic (Int 32 1)
