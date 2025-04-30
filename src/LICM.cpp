@@ -112,31 +112,31 @@ class LiftLoopInvariants : public IRMutator {
         return true;
     }
 
-    template<typename T, typename Body>
-    Body visit_let(const T *op) {
+    template<typename LetOrLetStmt>
+    auto visit_let(const LetOrLetStmt *op) -> decltype(op->body) {
         // Visit an entire chain of lets in a single method to conserve stack space.
         struct Frame {
-            const T *op;
+            const LetOrLetStmt *op;
             Expr new_value;
             ScopedBinding<> binding;
-            Frame(const T *op, Expr v, Scope<> &scope)
+            Frame(const LetOrLetStmt *op, Expr v, Scope<> &scope)
                 : op(op), new_value(std::move(v)), binding(scope, op->name) {
             }
         };
         vector<Frame> frames;
-        Body result;
+        decltype(op->body) result;
         do {
             frames.emplace_back(op, mutate(op->value), varying);
             result = op->body;
-        } while ((op = result.template as<T>()));
+        } while ((op = result.template as<LetOrLetStmt>()));
 
         result = mutate(result);
 
-        for (auto it = frames.rbegin(); it != frames.rend(); it++) {
-            if (it->new_value.same_as(it->op->value) && result.same_as(it->op->body)) {
-                result = it->op;
+        for (const auto &frame : reverse_view(frames)) {
+            if (frame.new_value.same_as(frame.op->value) && result.same_as(frame.op->body)) {
+                result = frame.op;
             } else {
-                result = T::make(it->op->name, std::move(it->new_value), result);
+                result = LetOrLetStmt::make(frame.op->name, std::move(frame.new_value), result);
             }
         }
 
@@ -144,11 +144,11 @@ class LiftLoopInvariants : public IRMutator {
     }
 
     Expr visit(const Let *op) override {
-        return visit_let<Let, Expr>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const LetStmt *op) override {
-        return visit_let<LetStmt, Stmt>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const For *op) override {
@@ -476,20 +476,20 @@ class GroupLoopInvariants : public IRMutator {
         return stmt;
     }
 
-    template<typename T, typename Body>
-    Body visit_let(const T *op) {
+    template<typename LetOrLetStmt>
+    auto visit_let(const LetOrLetStmt *op) -> decltype(op->body) {
         struct Frame {
-            const T *op;
+            const LetOrLetStmt *op;
             Expr new_value;
             ScopedBinding<int> binding;
-            Frame(const T *op, Expr v, int depth, Scope<int> &scope)
+            Frame(const LetOrLetStmt *op, Expr v, int depth, Scope<int> &scope)
                 : op(op),
                   new_value(std::move(v)),
                   binding(scope, op->name, depth) {
             }
         };
         std::vector<Frame> frames;
-        Body result;
+        decltype(op->body) result;
 
         do {
             result = op->body;
@@ -498,15 +498,15 @@ class GroupLoopInvariants : public IRMutator {
                 d = expr_depth(op->value);
             }
             frames.emplace_back(op, mutate(op->value), d, var_depth);
-        } while ((op = result.template as<T>()));
+        } while ((op = result.template as<LetOrLetStmt>()));
 
         result = mutate(result);
 
-        for (auto it = frames.rbegin(); it != frames.rend(); it++) {
-            if (it->new_value.same_as(it->op->value) && result.same_as(it->op->body)) {
-                result = it->op;
+        for (const auto &frame : reverse_view(frames)) {
+            if (frame.new_value.same_as(frame.op->value) && result.same_as(frame.op->body)) {
+                result = frame.op;
             } else {
-                result = T::make(it->op->name, it->new_value, result);
+                result = LetOrLetStmt::make(frame.op->name, frame.new_value, result);
             }
         }
 
@@ -514,11 +514,11 @@ class GroupLoopInvariants : public IRMutator {
     }
 
     Expr visit(const Let *op) override {
-        return visit_let<Let, Expr>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const LetStmt *op) override {
-        return visit_let<LetStmt, Stmt>(op);
+        return visit_let(op);
     }
 };
 

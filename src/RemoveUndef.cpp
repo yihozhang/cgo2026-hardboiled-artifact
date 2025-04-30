@@ -241,38 +241,38 @@ private:
         }
     }
 
-    template<typename T, typename Body>
-    Body visit_let(const T *op) {
+    template<typename LetOrLetStmt>
+    auto visit_let(const LetOrLetStmt *op) -> decltype(op->body) {
         // Visit an entire chain of lets in a single method to conserve stack space.
         struct Frame {
-            const T *op;
+            const LetOrLetStmt *op;
             Expr new_value;
             ScopedBinding<> binding;
-            Frame(const T *op, Expr v, Scope<> &scope)
+            Frame(const LetOrLetStmt *op, Expr v, Scope<> &scope)
                 : op(op), new_value(std::move(v)),
                   binding(!new_value.defined(), scope, op->name) {
             }
         };
         vector<Frame> frames;
 
-        Body result;
+        decltype(op->body) result;
         do {
             frames.emplace_back(op, mutate(op->value), dead_vars);
             result = op->body;
-        } while ((op = result.template as<T>()));
+        } while ((op = result.template as<LetOrLetStmt>()));
 
         result = mutate(result);
 
         if (result.defined()) {
-            for (auto it = frames.rbegin(); it != frames.rend(); it++) {
-                if (!it->new_value.defined()) {
+            for (const auto &frame : reverse_view(frames)) {
+                if (!frame.new_value.defined()) {
                     continue;
                 }
-                predicate = substitute(it->op->name, it->new_value, predicate);
-                if (it->new_value.same_as(it->op->value) && result.same_as(it->op->body)) {
-                    result = it->op;
+                predicate = substitute(frame.op->name, frame.new_value, predicate);
+                if (frame.new_value.same_as(frame.op->value) && result.same_as(frame.op->body)) {
+                    result = frame.op;
                 } else {
-                    result = T::make(it->op->name, std::move(it->new_value), result);
+                    result = LetOrLetStmt::make(frame.op->name, std::move(frame.new_value), result);
                 }
             }
         }
@@ -281,11 +281,11 @@ private:
     }
 
     Expr visit(const Let *op) override {
-        return visit_let<Let, Expr>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const LetStmt *op) override {
-        return visit_let<LetStmt, Stmt>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const AssertStmt *op) override {
@@ -540,13 +540,12 @@ private:
 
         result = mutate(result);
 
-        for (auto it = frames.rbegin(); it != frames.rend(); it++) {
-            op = it->first;
-            Stmt new_first = std::move(it->second);
+        for (const auto &[block, stmt] : reverse_view(frames)) {
+            Stmt new_first = stmt;
             if (!result.defined()) {
                 result = new_first;
-            } else if (new_first.same_as(op->first) && result.same_as(op->rest)) {
-                result = op;
+            } else if (new_first.same_as(block->first) && result.same_as(block->rest)) {
+                result = block;
             } else {
                 result = Block::make(new_first, result);
             }

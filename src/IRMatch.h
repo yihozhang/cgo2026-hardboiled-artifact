@@ -648,14 +648,14 @@ struct BinOp {
         }
         const Op &op = (const Op &)e;
         return (a.template match<bound>(*op.a.get(), state) &&
-                b.template match<bound | bindings<A>::mask>(*op.b.get(), state));
+                b.template match<(bound | bindings<A>::mask)>(*op.b.get(), state));
     }
 
     template<uint32_t bound, typename Op2, typename A2, typename B2>
     HALIDE_ALWAYS_INLINE bool match(const BinOp<Op2, A2, B2> &op, MatcherState &state) const noexcept {
         return (std::is_same<Op, Op2>::value &&
                 a.template match<bound>(unwrap(op.a), state) &&
-                b.template match<bound | bindings<A>::mask>(unwrap(op.b), state));
+                b.template match<(bound | bindings<A>::mask)>(unwrap(op.b), state));
     }
 
     constexpr static bool foldable = A::foldable && B::foldable;
@@ -750,14 +750,14 @@ struct CmpOp {
         }
         const Op &op = (const Op &)e;
         return (a.template match<bound>(*op.a.get(), state) &&
-                b.template match<bound | bindings<A>::mask>(*op.b.get(), state));
+                b.template match<(bound | bindings<A>::mask)>(*op.b.get(), state));
     }
 
     template<uint32_t bound, typename Op2, typename A2, typename B2>
     HALIDE_ALWAYS_INLINE bool match(const CmpOp<Op2, A2, B2> &op, MatcherState &state) const noexcept {
         return (std::is_same<Op, Op2>::value &&
                 a.template match<bound>(unwrap(op.a), state) &&
-                b.template match<bound | bindings<A>::mask>(unwrap(op.b), state));
+                b.template match<(bound | bindings<A>::mask)>(unwrap(op.b), state));
     }
 
     constexpr static bool foldable = A::foldable && B::foldable;
@@ -1320,20 +1320,30 @@ constexpr bool and_reduce(bool first, Args... rest) {
     return first && and_reduce(rest...);
 }
 
-// TODO: this can be replaced with std::min() once we require C++14 or later
-constexpr int const_min(int a, int b) {
-    return a < b ? a : b;
-}
+template<Call::IntrinsicOp intrin>
+struct OptionalIntrinType {
+    bool check(const Type &) const {
+        return true;
+    }
+};
 
-template<typename... Args>
+template<>
+struct OptionalIntrinType<Call::saturating_cast> {
+    halide_type_t type;
+    bool check(const Type &t) const {
+        return t == Type(type);
+    }
+};
+
+template<Call::IntrinsicOp intrin, typename... Args>
 struct Intrin {
     struct pattern_tag {};
-    Call::IntrinsicOp intrin;
     std::tuple<Args...> args;
     // The type of the output of the intrinsic node.
     // Only necessary in cases where it can't be inferred
     // from the input types (e.g. saturating_cast).
-    Type optional_type_hint;
+
+    OptionalIntrinType<intrin> optional_type_hint;
 
     static constexpr uint32_t binds = bitwise_or_reduce((bindings<Args>::mask)...);
 
@@ -1347,7 +1357,7 @@ struct Intrin {
     HALIDE_ALWAYS_INLINE bool match_args(int, const Call &c, MatcherState &state) const noexcept {
         using T = decltype(std::get<i>(args));
         return (std::get<i>(args).template match<bound>(*c.args[i].get(), state) &&
-                match_args<i + 1, bound | bindings<T>::mask>(0, c, state));
+                match_args<i + 1, (bound | bindings<T>::mask)>(0, c, state));
     }
 
     template<int i, uint32_t binds>
@@ -1362,7 +1372,7 @@ struct Intrin {
         }
         const Call &c = (const Call &)e;
         return (c.is_intrinsic(intrin) &&
-                ((optional_type_hint == Type()) || optional_type_hint == e.type) &&
+                optional_type_hint.check(e.type) &&
                 match_args<0, bound>(0, c, state));
     }
 
@@ -1394,11 +1404,11 @@ struct Intrin {
             return likely_if_innermost(std::move(arg0));
         } else if (intrin == Call::abs) {
             return abs(std::move(arg0));
-        } else if (intrin == Call::saturating_cast) {
-            return saturating_cast(optional_type_hint, std::move(arg0));
+        } else if constexpr (intrin == Call::saturating_cast) {
+            return saturating_cast(optional_type_hint.type, std::move(arg0));
         }
 
-        Expr arg1 = std::get<const_min(1, sizeof...(Args) - 1)>(args).make(state, type_hint);
+        Expr arg1 = std::get<std::min<size_t>(1, sizeof...(Args) - 1)>(args).make(state, type_hint);
         if (intrin == Call::absd) {
             return absd(std::move(arg0), std::move(arg1));
         } else if (intrin == Call::widen_right_add) {
@@ -1433,7 +1443,7 @@ struct Intrin {
             return rounding_shift_right(std::move(arg0), std::move(arg1));
         }
 
-        Expr arg2 = std::get<const_min(2, sizeof...(Args) - 1)>(args).make(state, type_hint);
+        Expr arg2 = std::get<std::min<size_t>(2, sizeof...(Args) - 1)>(args).make(state, type_hint);
         if (intrin == Call::mul_shift_right) {
             return mul_shift_right(std::move(arg0), std::move(arg1), std::move(arg2));
         } else if (intrin == Call::rounding_mul_shift_right) {
@@ -1489,98 +1499,113 @@ struct Intrin {
     }
 
     HALIDE_ALWAYS_INLINE
-    Intrin(Call::IntrinsicOp intrin, Args... args) noexcept
-        : intrin(intrin), args(args...) {
+    Intrin(Args... args) noexcept
+        : args(args...) {
     }
 };
 
-template<typename... Args>
-std::ostream &operator<<(std::ostream &s, const Intrin<Args...> &op) {
-    s << op.intrin << "(";
+template<Call::IntrinsicOp intrin, typename... Args>
+std::ostream &operator<<(std::ostream &s, const Intrin<intrin, Args...> &op) {
+    s << intrin << "(";
     op.print_args(s);
     s << ")";
     return s;
 }
 
-template<typename... Args>
-HALIDE_ALWAYS_INLINE auto intrin(Call::IntrinsicOp intrinsic_op, Args... args) noexcept -> Intrin<decltype(pattern_arg(args))...> {
-    return {intrinsic_op, pattern_arg(args)...};
+template<typename A, typename B>
+auto widen_right_add(A &&a, B &&b) noexcept -> Intrin<Call::widen_right_add, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
+}
+template<typename A, typename B>
+auto widen_right_mul(A &&a, B &&b) noexcept -> Intrin<Call::widen_right_mul, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
+}
+template<typename A, typename B>
+auto widen_right_sub(A &&a, B &&b) noexcept -> Intrin<Call::widen_right_sub, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 
 template<typename A, typename B>
-auto widen_right_add(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widen_right_add, pattern_arg(a), pattern_arg(b)};
+auto widening_add(A &&a, B &&b) noexcept -> Intrin<Call::widening_add, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto widen_right_mul(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widen_right_mul, pattern_arg(a), pattern_arg(b)};
+auto widening_sub(A &&a, B &&b) noexcept -> Intrin<Call::widening_sub, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto widen_right_sub(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widen_right_sub, pattern_arg(a), pattern_arg(b)};
-}
-
-template<typename A, typename B>
-auto widening_add(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widening_add, pattern_arg(a), pattern_arg(b)};
+auto widening_mul(A &&a, B &&b) noexcept -> Intrin<Call::widening_mul, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto widening_sub(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widening_sub, pattern_arg(a), pattern_arg(b)};
+auto saturating_add(A &&a, B &&b) noexcept -> Intrin<Call::saturating_add, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto widening_mul(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::widening_mul, pattern_arg(a), pattern_arg(b)};
-}
-template<typename A, typename B>
-auto saturating_add(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::saturating_add, pattern_arg(a), pattern_arg(b)};
-}
-template<typename A, typename B>
-auto saturating_sub(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::saturating_sub, pattern_arg(a), pattern_arg(b)};
+auto saturating_sub(A &&a, B &&b) noexcept -> Intrin<Call::saturating_sub, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A>
-auto saturating_cast(const Type &t, A &&a) noexcept -> Intrin<decltype(pattern_arg(a))> {
-    Intrin<decltype(pattern_arg(a))> p = {Call::saturating_cast, pattern_arg(a)};
-    p.optional_type_hint = t;
+auto saturating_cast(const Type &t, A &&a) noexcept -> Intrin<Call::saturating_cast, decltype(pattern_arg(a))> {
+    Intrin<Call::saturating_cast, decltype(pattern_arg(a))> p = {pattern_arg(a)};
+    p.optional_type_hint.type = t;
     return p;
 }
 template<typename A, typename B>
-auto halving_add(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::halving_add, pattern_arg(a), pattern_arg(b)};
+auto halving_add(A &&a, B &&b) noexcept -> Intrin<Call::halving_add, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto halving_sub(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::halving_sub, pattern_arg(a), pattern_arg(b)};
+auto halving_sub(A &&a, B &&b) noexcept -> Intrin<Call::halving_sub, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto rounding_halving_add(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::rounding_halving_add, pattern_arg(a), pattern_arg(b)};
+auto rounding_halving_add(A &&a, B &&b) noexcept -> Intrin<Call::rounding_halving_add, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto shift_left(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::shift_left, pattern_arg(a), pattern_arg(b)};
+auto shift_left(A &&a, B &&b) noexcept -> Intrin<Call::shift_left, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto shift_right(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::shift_right, pattern_arg(a), pattern_arg(b)};
+auto shift_right(A &&a, B &&b) noexcept -> Intrin<Call::shift_right, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto rounding_shift_left(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::rounding_shift_left, pattern_arg(a), pattern_arg(b)};
+auto rounding_shift_left(A &&a, B &&b) noexcept -> Intrin<Call::rounding_shift_left, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B>
-auto rounding_shift_right(A &&a, B &&b) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
-    return {Call::rounding_shift_right, pattern_arg(a), pattern_arg(b)};
+auto rounding_shift_right(A &&a, B &&b) noexcept -> Intrin<Call::rounding_shift_right, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
 }
 template<typename A, typename B, typename C>
-auto mul_shift_right(A &&a, B &&b, C &&c) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b)), decltype(pattern_arg(c))> {
-    return {Call::mul_shift_right, pattern_arg(a), pattern_arg(b), pattern_arg(c)};
+auto mul_shift_right(A &&a, B &&b, C &&c) noexcept -> Intrin<Call::mul_shift_right, decltype(pattern_arg(a)), decltype(pattern_arg(b)), decltype(pattern_arg(c))> {
+    return {pattern_arg(a), pattern_arg(b), pattern_arg(c)};
 }
 template<typename A, typename B, typename C>
-auto rounding_mul_shift_right(A &&a, B &&b, C &&c) noexcept -> Intrin<decltype(pattern_arg(a)), decltype(pattern_arg(b)), decltype(pattern_arg(c))> {
-    return {Call::rounding_mul_shift_right, pattern_arg(a), pattern_arg(b), pattern_arg(c)};
+auto rounding_mul_shift_right(A &&a, B &&b, C &&c) noexcept -> Intrin<Call::rounding_mul_shift_right, decltype(pattern_arg(a)), decltype(pattern_arg(b)), decltype(pattern_arg(c))> {
+    return {pattern_arg(a), pattern_arg(b), pattern_arg(c)};
+}
+
+template<typename A>
+auto abs(A &&a) noexcept -> Intrin<Call::abs, decltype(pattern_arg(a))> {
+    return {pattern_arg(a)};
+}
+
+template<typename A, typename B>
+auto absd(A &&a, B &&b) noexcept -> Intrin<Call::absd, decltype(pattern_arg(a)), decltype(pattern_arg(b))> {
+    return {pattern_arg(a), pattern_arg(b)};
+}
+
+template<typename A>
+auto likely(A &&a) noexcept -> Intrin<Call::likely, decltype(pattern_arg(a))> {
+    return {pattern_arg(a)};
+}
+
+template<typename A>
+auto likely_if_innermost(A &&a) noexcept -> Intrin<Call::likely_if_innermost, decltype(pattern_arg(a))> {
+    return {pattern_arg(a)};
 }
 
 template<typename A>
@@ -1662,14 +1687,14 @@ struct SelectOp {
         }
         const Select &op = (const Select &)e;
         return (c.template match<bound>(*op.condition.get(), state) &&
-                t.template match<bound | bindings<C>::mask>(*op.true_value.get(), state) &&
-                f.template match<bound | bindings<C>::mask | bindings<T>::mask>(*op.false_value.get(), state));
+                t.template match<(bound | bindings<C>::mask)>(*op.true_value.get(), state) &&
+                f.template match<(bound | bindings<C>::mask | bindings<T>::mask)>(*op.false_value.get(), state));
     }
     template<uint32_t bound, typename C2, typename T2, typename F2>
     HALIDE_ALWAYS_INLINE bool match(const SelectOp<C2, T2, F2> &instance, MatcherState &state) const noexcept {
         return (c.template match<bound>(unwrap(instance.c), state) &&
-                t.template match<bound | bindings<C>::mask>(unwrap(instance.t), state) &&
-                f.template match<bound | bindings<C>::mask | bindings<T>::mask>(unwrap(instance.f), state));
+                t.template match<(bound | bindings<C>::mask)>(unwrap(instance.t), state) &&
+                f.template match<(bound | bindings<C>::mask | bindings<T>::mask)>(unwrap(instance.f), state));
     }
 
     HALIDE_ALWAYS_INLINE
@@ -1735,7 +1760,7 @@ struct BroadcastOp {
     template<uint32_t bound, typename A2, typename B2>
     HALIDE_ALWAYS_INLINE bool match(const BroadcastOp<A2, B2> &op, MatcherState &state) const noexcept {
         return (a.template match<bound>(unwrap(op.a), state) &&
-                lanes.template match<bound | bindings<A>::mask>(unwrap(op.lanes), state));
+                lanes.template match<(bound | bindings<A>::mask)>(unwrap(op.lanes), state));
     }
 
     HALIDE_ALWAYS_INLINE
@@ -1799,8 +1824,8 @@ struct RampOp {
         }
         const Ramp &op = (const Ramp &)e;
         if (a.template match<bound>(*op.base.get(), state) &&
-            b.template match<bound | bindings<A>::mask>(*op.stride.get(), state) &&
-            lanes.template match<bound | bindings<A>::mask | bindings<B>::mask>(op.lanes, state)) {
+            b.template match<(bound | bindings<A>::mask)>(*op.stride.get(), state) &&
+            lanes.template match<(bound | bindings<A>::mask | bindings<B>::mask)>(op.lanes, state)) {
             return true;
         } else {
             return false;
@@ -1810,8 +1835,8 @@ struct RampOp {
     template<uint32_t bound, typename A2, typename B2, typename C2>
     HALIDE_ALWAYS_INLINE bool match(const RampOp<A2, B2, C2> &op, MatcherState &state) const noexcept {
         return (a.template match<bound>(unwrap(op.a), state) &&
-                b.template match<bound | bindings<A>::mask>(unwrap(op.b), state) &&
-                lanes.template match<bound | bindings<A>::mask | bindings<B>::mask>(unwrap(op.lanes), state));
+                b.template match<(bound | bindings<A>::mask)>(unwrap(op.b), state) &&
+                lanes.template match<(bound | bindings<A>::mask | bindings<B>::mask)>(unwrap(op.lanes), state));
     }
 
     HALIDE_ALWAYS_INLINE
@@ -1862,7 +1887,7 @@ struct VectorReduceOp {
             const VectorReduce &op = (const VectorReduce &)e;
             if (op.op == reduce_op &&
                 a.template match<bound>(*op.value.get(), state) &&
-                lanes.template match<bound | bindings<A>::mask>(op.type.lanes(), state)) {
+                lanes.template match<(bound | bindings<A>::mask)>(op.type.lanes(), state)) {
                 return true;
             }
         }
@@ -1873,7 +1898,7 @@ struct VectorReduceOp {
     HALIDE_ALWAYS_INLINE bool match(const VectorReduceOp<A2, B2, reduce_op_2> &op, MatcherState &state) const noexcept {
         return (reduce_op == reduce_op_2 &&
                 a.template match<bound>(unwrap(op.a), state) &&
-                lanes.template match<bound | bindings<A>::mask>(unwrap(op.lanes), state));
+                lanes.template match<(bound | bindings<A>::mask)>(unwrap(op.lanes), state));
     }
 
     HALIDE_ALWAYS_INLINE
@@ -2122,9 +2147,9 @@ struct SliceOp {
         return v.vectors.size() == 1 &&
                v.is_slice() &&
                vec.template match<bound>(*v.vectors[0].get(), state) &&
-               base.template match<bound | bindings<Vec>::mask>(v.slice_begin(), state) &&
-               stride.template match<bound | bindings<Vec>::mask | bindings<Base>::mask>(v.slice_stride(), state) &&
-               lanes.template match<bound | bindings<Vec>::mask | bindings<Base>::mask | bindings<Stride>::mask>(v.type.lanes(), state);
+               base.template match<(bound | bindings<Vec>::mask)>(v.slice_begin(), state) &&
+               stride.template match<(bound | bindings<Vec>::mask | bindings<Base>::mask)>(v.slice_stride(), state) &&
+               lanes.template match<(bound | bindings<Vec>::mask | bindings<Base>::mask | bindings<Stride>::mask)>(v.type.lanes(), state);
     }
 
     HALIDE_ALWAYS_INLINE
@@ -2425,7 +2450,8 @@ template<typename A>
 struct IsInt {
     struct pattern_tag {};
     A a;
-    int bits, lanes;
+    uint8_t bits;
+    uint16_t lanes;
 
     constexpr static uint32_t binds = bindings<A>::mask;
 
@@ -2448,7 +2474,7 @@ struct IsInt {
 };
 
 template<typename A>
-HALIDE_ALWAYS_INLINE auto is_int(A &&a, int bits = 0, int lanes = 0) noexcept -> IsInt<decltype(pattern_arg(a))> {
+HALIDE_ALWAYS_INLINE auto is_int(A &&a, uint8_t bits = 0, uint16_t lanes = 0) noexcept -> IsInt<decltype(pattern_arg(a))> {
     assert_is_lvalue_if_expr<A>();
     return {pattern_arg(a), bits, lanes};
 }
@@ -2470,7 +2496,8 @@ template<typename A>
 struct IsUInt {
     struct pattern_tag {};
     A a;
-    int bits, lanes;
+    uint8_t bits;
+    uint16_t lanes;
 
     constexpr static uint32_t binds = bindings<A>::mask;
 
@@ -2493,7 +2520,7 @@ struct IsUInt {
 };
 
 template<typename A>
-HALIDE_ALWAYS_INLINE auto is_uint(A &&a, int bits = 0, int lanes = 0) noexcept -> IsUInt<decltype(pattern_arg(a))> {
+HALIDE_ALWAYS_INLINE auto is_uint(A &&a, uint8_t bits = 0, uint16_t lanes = 0) noexcept -> IsUInt<decltype(pattern_arg(a))> {
     assert_is_lvalue_if_expr<A>();
     return {pattern_arg(a), bits, lanes};
 }

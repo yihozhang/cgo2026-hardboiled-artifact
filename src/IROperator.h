@@ -9,8 +9,11 @@
 
 #include <cmath>
 #include <map>
+#include <optional>
 
+#include "ConstantInterval.h"
 #include "Expr.h"
+#include "Scope.h"
 #include "Target.h"
 #include "Tuple.h"
 
@@ -27,21 +30,25 @@ bool is_const(const Expr &e);
 bool is_const(const Expr &e, int64_t v);
 
 /** If an expression is an IntImm or a Broadcast of an IntImm, return
- * a pointer to its value. Otherwise returns nullptr. */
-const int64_t *as_const_int(const Expr &e);
+ * a its value. Otherwise returns std::nullopt. */
+std::optional<int64_t> as_const_int(const Expr &e);
 
 /** If an expression is a UIntImm or a Broadcast of a UIntImm, return
- * a pointer to its value. Otherwise returns nullptr. */
-const uint64_t *as_const_uint(const Expr &e);
+ * its value. Otherwise returns std::nullopt. */
+std::optional<uint64_t> as_const_uint(const Expr &e);
 
 /** If an expression is a FloatImm or a Broadcast of a FloatImm,
- * return a pointer to its value. Otherwise returns nullptr. */
-const double *as_const_float(const Expr &e);
+ * return its value. Otherwise returns std::nullopt. */
+std::optional<double> as_const_float(const Expr &e);
 
-/** Is the expression a constant integer power of two. Also returns
- * log base two of the expression if it is. Only returns true for
- * integer types. */
-bool is_const_power_of_two_integer(const Expr &e, int *bits);
+/** Is the expression a constant integer power of two. Returns log base two of
+ * the expression if it is, or std::nullopt if not. Also returns std::nullopt
+ * for non-integer types. */
+// @{
+std::optional<int> is_const_power_of_two_integer(const Expr &e);
+std::optional<int> is_const_power_of_two_integer(uint64_t);
+std::optional<int> is_const_power_of_two_integer(int64_t);
+// @}
 
 /** Is the expression a const (as defined by is_const), and also
  * strictly greater than zero (in all lanes, if a vector expression) */
@@ -145,13 +152,16 @@ Expr const_false(int lanes = 1);
 /** Attempt to cast an expression to a smaller type while provably not losing
  * information. If it can't be done, return an undefined Expr.
  *
- * Optionally accepts a map that gives the constant bounds of exprs already
- * analyzed to avoid redoing work across many calls to lossless_cast. It is not
- * safe to use this optional map in contexts where the same Expr object may
- * take on a different value. For example:
- * (let x = 4 in some_expr_object) + (let x = 5 in the_same_expr_object)).
- * It is safe to use it after uniquify_variable_names has been run. */
-Expr lossless_cast(Type t, Expr e, std::map<Expr, ConstantInterval, ExprCompare> *cache = nullptr);
+ * Optionally accepts a scope giving the constant bounds of any variables, and a
+ * map that gives the constant bounds of exprs already analyzed to avoid redoing
+ * work across many calls to lossless_cast. It is not safe to use this optional
+ * map in contexts where the same Expr object may take on a different value. For
+ * example: (let x = 4 in some_expr_object) + (let x = 5 in
+ * the_same_expr_object)).  It is safe to use it after uniquify_variable_names
+ * has been run. */
+Expr lossless_cast(Type t, Expr e,
+                   const Scope<ConstantInterval> &scope = Scope<ConstantInterval>::empty_scope(),
+                   std::map<Expr, ConstantInterval, ExprCompare> *cache = nullptr);
 
 /** Attempt to negate x without introducing new IR and without overflow.
  * If it can't be done, return an undefined Expr. */
@@ -965,8 +975,9 @@ Expr pow(Expr x, Expr y);
  * mantissa. Vectorizes cleanly. */
 Expr erf(const Expr &x);
 
-/** Fast vectorizable approximation to some trigonometric functions for Float(32).
- * Absolute approximation error is less than 1e-5. */
+/** Fast vectorizable approximation to some trigonometric functions for
+ * Float(32).  Absolute approximation error is less than 1e-5. Slow on x86 if
+ * you don't have at least sse 4.1. */
 // @{
 Expr fast_sin(const Expr &x);
 Expr fast_cos(const Expr &x);
@@ -974,19 +985,22 @@ Expr fast_cos(const Expr &x);
 
 /** Fast approximate cleanly vectorizable log for Float(32). Returns
  * nonsense for x <= 0.0f. Accurate up to the last 5 bits of the
- * mantissa. Vectorizes cleanly. */
+ * mantissa. Vectorizes cleanly. Slow on x86 if you don't
+ * have at least sse 4.1. */
 Expr fast_log(const Expr &x);
 
 /** Fast approximate cleanly vectorizable exp for Float(32). Returns
  * nonsense for inputs that would overflow or underflow. Typically
  * accurate up to the last 5 bits of the mantissa. Gets worse when
- * approaching overflow. Vectorizes cleanly. */
+ * approaching overflow. Vectorizes cleanly. Slow on x86 if you don't
+ * have at least sse 4.1. */
 Expr fast_exp(const Expr &x);
 
 /** Fast approximate cleanly vectorizable pow for Float(32). Returns
  * nonsense for x < 0.0f. Accurate up to the last 5 bits of the
  * mantissa for typical exponents. Gets worse when approaching
- * overflow. Vectorizes cleanly. */
+ * overflow. Vectorizes cleanly. Slow on x86 if you don't
+ * have at least sse 4.1. */
 Expr fast_pow(Expr x, Expr y);
 
 /** Fast approximate inverse for Float(32). Corresponds to the rcpps

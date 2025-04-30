@@ -392,7 +392,7 @@ private:
         const Mul *mul_a = a.as<Mul>();
         Expr expr;
         if (a_uses_var && !b_uses_var) {
-            const int64_t *ib = as_const_int(b);
+            auto ib = as_const_int(b);
             auto is_multiple_of_b = [&](const Expr &e) {
                 if (ib && op->type.is_scalar()) {
                     int64_t r = 0;
@@ -1239,6 +1239,10 @@ Expr and_condition_over_domain(const Expr &e, const Scope<Interval> &varying) {
     return simplify(bounds.min);
 }
 
+Expr or_condition_over_domain(const Expr &c, const Scope<Interval> &varying) {
+    return simplify(!and_condition_over_domain(simplify(!c), varying));
+}
+
 // Testing code
 
 namespace {
@@ -1342,8 +1346,8 @@ void solve_test() {
             continue;
         }
         for (int num = 5; num <= 10; num++) {
-            Expr in[] = {x * den<num, x * den <= num, x * den == num, x * den != num, x * den >= num, x * den> num,
-                         x / den<num, x / den <= num, x / den == num, x / den != num, x / den >= num, x / den> num};
+            Expr in[] = {x * den < num, x * den <= num, x * den == num, x * den != num, x * den >= num, x * den > num,
+                         x / den < num, x / den <= num, x / den == num, x / den != num, x / den >= num, x / den > num};
             for (const auto &e : in) {
                 SolverResult solved = solve_expression(e, "x");
                 internal_assert(solved.fully_solved) << "Error: failed to solve for x in " << e << "\n";

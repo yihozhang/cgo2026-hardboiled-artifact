@@ -576,6 +576,11 @@ void IRPrinter::print(const Stmt &ir) {
     ir.accept(this);
 }
 
+void IRPrinter::print_summary(const Stmt &ir) {
+    ScopedValue<bool> old(is_summary, true);
+    ir.accept(this);
+}
+
 void IRPrinter::print_list(const std::vector<Expr> &exprs) {
     for (size_t i = 0; i < exprs.size(); i++) {
         print_no_parens(exprs[i]);
@@ -598,6 +603,11 @@ void IRPrinter::visit(const UIntImm *op) {
 }
 
 void IRPrinter::visit(const FloatImm *op) {
+    const bool use_scientific_format = (op->value != 0.0) && (std::log10(std::abs(op->value)) < -6);
+    if (use_scientific_format) {
+        stream << std::scientific;
+    }
+
     switch (op->type.bits()) {
     case 64:
         stream << op->value;
@@ -610,6 +620,10 @@ void IRPrinter::visit(const FloatImm *op) {
         break;
     default:
         internal_error << "Bad bit-width for float: " << op->type << "\n";
+    }
+
+    if (use_scientific_format) {
+        stream << std::fixed;
     }
 }
 
@@ -874,7 +888,9 @@ void IRPrinter::visit(const Let *op) {
     stream << "let " << op->name << " = ";
     print(op->value);
     stream << " in ";
-    print(op->body);
+    if (!is_summary) {
+        print(op->body);
+    }
     close();
 }
 
@@ -884,7 +900,9 @@ void IRPrinter::visit(const LetStmt *op) {
     print_no_parens(op->value);
     stream << "\n";
 
-    print(op->body);
+    if (!is_summary) {
+        print(op->body);
+    }
 }
 
 void IRPrinter::visit(const AssertStmt *op) {
@@ -914,13 +932,9 @@ void IRPrinter::visit(const For *op) {
     print_no_parens(op->min);
     stream << ", ";
     print_no_parens(op->extent);
-    stream << ") {\n";
+    stream << ") ";
 
-    indent++;
-    print(op->body);
-    indent--;
-
-    stream << get_indent() << "}\n";
+    print_braced_stmt(op->body, 1);
 }
 
 void IRPrinter::visit(const Acquire *op) {
@@ -928,11 +942,8 @@ void IRPrinter::visit(const Acquire *op) {
     print_no_parens(op->semaphore);
     stream << ", ";
     print_no_parens(op->count);
-    stream << ") {\n";
-    indent++;
-    print(op->body);
-    indent--;
-    stream << get_indent() << "}\n";
+    stream << ") ";
+    print_braced_stmt(op->body, 1);
 }
 
 void IRPrinter::print_lets(const Let *let) {
@@ -941,13 +952,28 @@ void IRPrinter::print_lets(const Let *let) {
     stream << "let " << let->name << " = ";
     print_no_parens(let->value);
     stream << " in\n";
-    if (const Let *next = let->body.as<Let>()) {
+    if (is_summary) {
+        stream << get_indent() << "...\n";
+    } else if (const Let *next = let->body.as<Let>()) {
         print_lets(next);
     } else {
         stream << get_indent();
         print_no_parens(let->body);
         stream << "\n";
     }
+}
+
+void IRPrinter::print_braced_stmt(const Stmt &stmt, int extra_indent) {
+    if (is_summary) {
+        stream << "{ ... }\n";
+        return;
+    }
+
+    stream << "{\n";
+    indent += extra_indent;
+    print(stmt);
+    indent -= extra_indent;
+    stream << get_indent() << "}\n";
 }
 
 void IRPrinter::visit(const Store *op) {
@@ -1047,7 +1073,10 @@ void IRPrinter::visit(const Allocate *op) {
         stream << get_indent() << " custom_delete { " << op->free_function << "(" << op->name << "); }";
     }
     stream << "\n";
-    print(op->body);
+
+    if (!is_summary) {
+        print(op->body);
+    }
 }
 
 void IRPrinter::visit(const Free *op) {
@@ -1076,13 +1105,9 @@ void IRPrinter::visit(const Realize *op) {
         stream << " if ";
         print(op->condition);
     }
-    stream << " {\n";
 
-    indent++;
-    print(op->body);
-    indent--;
-
-    stream << get_indent() << "}\n";
+    stream << " ";
+    print_braced_stmt(op->body);
 }
 
 void IRPrinter::visit(const Prefetch *op) {
@@ -1111,12 +1136,16 @@ void IRPrinter::visit(const Prefetch *op) {
         indent--;
         stream << get_indent() << "}\n";
     }
-    print(op->body);
+    if (!is_summary) {
+        print(op->body);
+    }
 }
 
 void IRPrinter::visit(const Block *op) {
-    print(op->first);
-    print(op->rest);
+    if (!is_summary) {
+        print(op->first);
+        print(op->rest);
+    }
 }
 
 void IRPrinter::visit(const Fork *op) {
@@ -1130,14 +1159,23 @@ void IRPrinter::visit(const Fork *op) {
     stmts.push_back(rest);
 
     stream << get_indent() << "fork ";
-    for (const Stmt &s : stmts) {
-        stream << "{\n";
-        indent++;
-        print(s);
-        indent--;
-        stream << get_indent() << "} ";
+    if (is_summary) {
+        stream << "[" << stmts.size();
+        if (stmts.size() == 1) {
+            stream << " child]";
+        } else {
+            stream << " children]";
+        }
+    } else {
+        for (const Stmt &s : stmts) {
+            stream << "{\n";
+            indent++;
+            print(s);
+            indent--;
+            stream << get_indent() << "} ";
+        }
+        stream << "\n";
     }
-    stream << "\n";
 }
 
 void IRPrinter::visit(const IfThenElse *op) {
@@ -1218,32 +1256,43 @@ void IRPrinter::visit(const VectorReduce *op) {
 }
 
 void IRPrinter::visit(const Atomic *op) {
+    stream << get_indent();
+
     if (op->mutex_name.empty()) {
-        stream << get_indent() << "atomic ("
-               << op->producer_name << ") {\n";
+        stream << "atomic (" << op->producer_name << ") ";
     } else {
-        stream << get_indent() << "atomic ("
-               << op->producer_name << ", "
-               << op->mutex_name << ") {\n";
+        stream << "atomic (" << op->producer_name << ", " << op->mutex_name << ") ";
     }
-    indent += 2;
-    print(op->body);
-    indent -= 2;
-    stream << get_indent() << "}\n";
+
+    print_braced_stmt(op->body);
 }
 
 void IRPrinter::visit(const HoistedStorage *op) {
     if (op->name.empty()) {
-        stream << get_indent() << "hoisted_storage {\n";
+        stream << get_indent() << "hoisted_storage ";
     } else {
-        stream << get_indent() << "hoisted_storage (";
-        stream << op->name;
-        stream << ") {\n";
+        stream << get_indent() << "hoisted_storage (" << op->name << ") ";
     }
-    indent += 2;
-    print(op->body);
-    indent -= 2;
-    stream << get_indent() << "}\n";
+
+    print_braced_stmt(op->body);
+}
+
+std::string lldb_string(const Expr &ir) {
+    std::stringstream s{};
+    IRPrinter p(s);
+    p.print_no_parens(ir);
+    return s.str();
+}
+
+std::string lldb_string(const Internal::BaseExprNode *n) {
+    return lldb_string(Expr(n));
+}
+
+std::string lldb_string(const Stmt &ir) {
+    std::stringstream s{};
+    IRPrinter p(s);
+    p.print_summary(ir);
+    return s.str();
 }
 
 }  // namespace Internal

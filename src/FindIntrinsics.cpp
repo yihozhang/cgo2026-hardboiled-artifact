@@ -101,11 +101,10 @@ protected:
     Scope<ConstantInterval> let_var_bounds;
 
     Expr lossless_cast(Type t, const Expr &e) {
-        return Halide::Internal::lossless_cast(t, e, &bounds_cache);
+        return Halide::Internal::lossless_cast(t, e, let_var_bounds, &bounds_cache);
     }
 
     ConstantInterval constant_integer_bounds(const Expr &e) {
-        // TODO: Use the scope - add let visitors
         return Halide::Internal::constant_integer_bounds(e, let_var_bounds, &bounds_cache);
     }
 
@@ -208,6 +207,51 @@ protected:
         }
 
         return Expr();
+    }
+
+    template<typename LetOrLetStmt>
+    auto visit_let(const LetOrLetStmt *op) -> decltype(op->body) {
+        struct Frame {
+            const LetOrLetStmt *orig;
+            Expr new_value;
+            ScopedBinding<ConstantInterval> bind;
+            Frame(const LetOrLetStmt *orig,
+                  Expr &&new_value,
+                  ScopedBinding<ConstantInterval> &&bind)
+                : orig(orig), new_value(std::move(new_value)), bind(std::move(bind)) {
+            }
+        };
+        std::vector<Frame> frames;
+        decltype(op->body) body;
+        while (op) {
+            Expr v = mutate(op->value);
+            ConstantInterval b = constant_integer_bounds(v);
+            frames.emplace_back(op,
+                                std::move(v),
+                                ScopedBinding<ConstantInterval>(let_var_bounds, op->name, b));
+            body = op->body;
+            op = body.template as<LetOrLetStmt>();
+        }
+
+        body = mutate(body);
+
+        for (const auto &f : reverse_view(frames)) {
+            if (f.new_value.same_as(f.orig->value) && body.same_as(f.orig->body)) {
+                body = f.orig;
+            } else {
+                body = LetOrLetStmt::make(f.orig->name, f.new_value, body);
+            }
+        }
+
+        return body;
+    }
+
+    Expr visit(const Let *op) override {
+        return visit_let(op);
+    }
+
+    Stmt visit(const LetStmt *op) override {
+        return visit_let(op);
     }
 
     Expr visit(const Add *op) override {
@@ -385,11 +429,10 @@ protected:
 
         // Rewrite multiplies to shifts if possible.
         if (op->type.is_int() || op->type.is_uint()) {
-            int pow2 = 0;
-            if (is_const_power_of_two_integer(a, &pow2)) {
-                return mutate(b << cast(UInt(b.type().bits()), pow2));
-            } else if (is_const_power_of_two_integer(b, &pow2)) {
-                return mutate(a << cast(UInt(a.type().bits()), pow2));
+            if (auto pow2 = is_const_power_of_two_integer(a)) {
+                return mutate(b << cast(UInt(b.type().bits()), *pow2));
+            } else if (auto pow2 = is_const_power_of_two_integer(b)) {
+                return mutate(a << cast(UInt(a.type().bits()), *pow2));
             }
         }
 
@@ -467,9 +510,8 @@ protected:
         Expr a = mutate(op->a);
         Expr b = mutate(op->b);
 
-        int shift_amount;
-        if (is_const_power_of_two_integer(b, &shift_amount) && op->type.is_int_or_uint()) {
-            return mutate(a >> make_const(UInt(a.type().bits()), shift_amount));
+        if (auto shift_amount = is_const_power_of_two_integer(b)) {
+            return mutate(a >> make_const(UInt(a.type().bits()), *shift_amount));
         }
 
         if (a.same_as(op->a) && b.same_as(op->b)) {
@@ -518,8 +560,12 @@ protected:
             return IRMutator::visit(op);
         }
 
-        Expr value = mutate(op->value);
+        return visit_cast(op, mutate(op->value));
+    }
 
+    // Isolated in its own function to keep the (large) stack frame off the
+    // recursive path.
+    HALIDE_NEVER_INLINE Expr visit_cast(const Cast *op, Expr &&value) {
         // This mutator can generate redundant casts. We can't use the simplifier because it
         // undoes some of the intrinsic lowering here, and it causes some problems due to
         // factoring (instead of distributing) constants.
@@ -552,6 +598,7 @@ protected:
             auto is_x_same_uint = op->type.is_uint() && is_uint(x, bits);
             auto is_x_same_int_or_uint = is_x_same_int || is_x_same_uint;
             auto x_y_same_sign = (is_int(x) && is_int(y)) || (is_uint(x) && is_uint(y));
+
             if (
                 // Saturating patterns
                 rewrite(max(min(widening_add(x, y), upper), lower),
@@ -568,11 +615,11 @@ protected:
 
                 rewrite(min(widening_add(x, y), upper),
                         saturating_add(x, y),
-                        op->type.is_uint() && is_x_same_uint) ||
+                        is_x_same_uint) ||
 
                 rewrite(max(widening_sub(x, y), lower),
                         saturating_sub(x, y),
-                        op->type.is_uint() && is_x_same_uint) ||
+                        is_x_same_uint) ||
 
                 // Saturating narrow patterns.
                 rewrite(max(min(x, upper), lower),
@@ -694,11 +741,18 @@ protected:
                 bool is_saturated = op->value.as<Max>() || op->value.as<Min>();
                 Expr a = lossless_cast(op->type, shift->args[0]);
                 Expr b = lossless_cast(op->type.with_code(shift->args[1].type().code()), shift->args[1]);
-                if (a.defined() && b.defined()) {
-                    if (!is_saturated ||
-                        (shift->is_intrinsic(Call::rounding_shift_right) && can_prove(b >= 0)) ||
-                        (shift->is_intrinsic(Call::rounding_shift_left) && can_prove(b <= 0))) {
-                        return mutate(Call::make(op->type, shift->name, {a, b}, Call::PureIntrinsic));
+                if (b.defined()) {
+                    // Doing the shift in the narrower type might introduce UB where
+                    // there was no UB before, so we need to make sure b is bounded.
+                    auto b_bounds = constant_integer_bounds(b);
+                    const int max_shift = op->type.bits() - 1;
+
+                    if (a.defined() && b_bounds >= -max_shift && b_bounds <= max_shift) {
+                        if (!is_saturated ||
+                            (shift->is_intrinsic(Call::rounding_shift_right) && can_prove(b >= 0)) ||
+                            (shift->is_intrinsic(Call::rounding_shift_left) && can_prove(b <= 0))) {
+                            return mutate(Call::make(op->type, shift->name, {a, b}, Call::PureIntrinsic));
+                        }
                     }
                 }
             }
@@ -723,10 +777,17 @@ protected:
         op = mutated.as<Call>();
         if (!op) {
             return mutated;
+        } else {
+            return visit_call(op);
         }
+    }
 
+    // Isolated in its own function to keep the (large) stack frame off the
+    // recursive path. The Call node has already been mutated by the base class
+    // visitor.
+    HALIDE_NEVER_INLINE Expr visit_call(const Call *op) {
         auto rewrite = IRMatcher::rewriter(op, op->type);
-        if (rewrite(intrin(Call::abs, widening_sub(x, y)), cast(op->type, intrin(Call::absd, x, y))) ||
+        if (rewrite(abs(widening_sub(x, y)), cast(op->type, absd(x, y))) ||
             false) {
             return rewrite.result;
         }
@@ -1108,8 +1169,12 @@ class SubstituteInWideningLets : public IRMutator {
             std::string name;
             Expr new_value;
             ScopedBinding<Expr> bind;
-            Frame(const std::string &name, const Expr &new_value, ScopedBinding<Expr> &&bind)
-                : name(name), new_value(new_value), bind(std::move(bind)) {
+            Frame(const std::string &name,
+                  const Expr &new_value,
+                  ScopedBinding<Expr> &&bind)
+                : name(name),
+                  new_value(new_value),
+                  bind(std::move(bind)) {
             }
         };
         std::vector<Frame> frames;

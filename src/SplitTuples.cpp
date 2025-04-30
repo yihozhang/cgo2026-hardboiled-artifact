@@ -36,29 +36,6 @@ public:
     }
 };
 
-// Visitor and helper function to test if a piece of IR uses an extern image.
-class UsesExternImage : public IRVisitor {
-    using IRVisitor::visit;
-
-    void visit(const Call *c) override {
-        if (c->call_type == Call::Image) {
-            result = true;
-        } else {
-            IRVisitor::visit(c);
-        }
-    }
-
-public:
-    UsesExternImage() = default;
-    bool result = false;
-};
-
-inline bool uses_extern_image(const Stmt &s) {
-    UsesExternImage uses;
-    s.accept(&uses);
-    return uses.result;
-}
-
 class SplitTuples : public IRMutator {
     using IRMutator::visit;
 
@@ -202,9 +179,9 @@ class SplitTuples : public IRMutator {
                         aliases = aliases && (a[i] == b[i]);
                     }
                     // Might need some of the containing lets
-                    for (auto it = lets.rbegin(); it != lets.rend(); it++) {
-                        if (expr_uses_var(aliases, it->first)) {
-                            aliases = Let::make(it->first, it->second, aliases);
+                    for (const auto &[var, value] : reverse_view(lets)) {
+                        if (expr_uses_var(aliases, var)) {
+                            aliases = Let::make(var, value, aliases);
                         }
                     }
                     return !can_prove(!aliases);
@@ -443,8 +420,8 @@ class SplitScatterGather : public IRMutator {
         body = substitute(op->name, gather_replacement, body);
         body = mutate(body);
 
-        for (auto it = lets.rbegin(); it != lets.rend(); it++) {
-            body = LetStmt::make(it->first, it->second, body);
+        for (const auto &[var, value] : reverse_view(lets)) {
+            body = LetStmt::make(var, value, body);
         }
 
         return body;
@@ -472,8 +449,8 @@ class SplitScatterGather : public IRMutator {
             body = mutate(body);
         }
 
-        for (auto it = lets.rbegin(); it != lets.rend(); it++) {
-            body = LetStmt::make(it->first, it->second, body);
+        for (const auto &[var, value] : reverse_view(lets)) {
+            body = LetStmt::make(var, value, body);
         }
 
         return body;
@@ -536,8 +513,8 @@ class SplitScatterGather : public IRMutator {
             }
         }
 
-        for (auto it = lets.rbegin(); it != lets.rend(); it++) {
-            s = LetStmt::make(it->first, it->second, s);
+        for (const auto &[var, value] : reverse_view(lets)) {
+            s = LetStmt::make(var, value, s);
         }
 
         return s;

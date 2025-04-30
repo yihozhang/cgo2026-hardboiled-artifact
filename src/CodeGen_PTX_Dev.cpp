@@ -140,7 +140,7 @@ void CodeGen_PTX_Dev::add_kernel(Stmt stmt,
     vector<llvm::Type *> arg_types(args.size());
     for (size_t i = 0; i < args.size(); i++) {
         if (args[i].is_buffer) {
-            arg_types[i] = PointerType::get(llvm_type_of(UInt(8)), 0);
+            arg_types[i] = ptr_t;
         } else {
             arg_types[i] = llvm_type_of(args[i].type);
         }
@@ -157,6 +157,8 @@ void CodeGen_PTX_Dev::add_kernel(Stmt stmt,
             function->addParamAttr(i, Attribute::NoAlias);
         }
     }
+
+    function->setCallingConv(llvm::CallingConv::PTX_Kernel);
 
     // Make the initial basic block
     entry_block = BasicBlock::Create(*context, "entry", function);
@@ -283,7 +285,7 @@ void CodeGen_PTX_Dev::visit(const Call *op) {
         // arguments
         internal_assert(op->args.size() == 1) << "gpu_thread_barrier() intrinsic must specify memory fence type.\n";
 
-        const auto *fence_type_ptr = as_const_int(op->args[0]);
+        auto fence_type_ptr = as_const_int(op->args[0]);
         internal_assert(fence_type_ptr) << "gpu_thread_barrier() parameter is not a constant integer.\n";
 
         llvm::Function *barrier0 = module->getFunction("llvm.nvvm.barrier0");
@@ -350,7 +352,7 @@ void CodeGen_PTX_Dev::visit(const Allocate *alloc) {
     memory_type_of[alloc->name] = alloc->memory_type;
     if (alloc->memory_type == MemoryType::GPUShared) {
         // PTX uses zero in address space 3 as the base address for shared memory
-        Value *shared_base = Constant::getNullValue(PointerType::get(i8_t, 3));
+        Value *shared_base = Constant::getNullValue(PointerType::get(*context, 3));
         sym_push(alloc->name, shared_base);
     } else {
         debug(2) << "Allocate " << alloc->name << " on device\n";
@@ -653,17 +655,17 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     options.NoZerosInBSS = false;
     options.GuaranteedTailCallOpt = false;
 
-#if LLVM_VERSION >= 180
-    const auto opt_level = CodeGenOptLevel::Aggressive;
-#else
-    const auto opt_level = CodeGenOpt::Aggressive;
-#endif
     std::unique_ptr<TargetMachine>
-        target_machine(llvm_target->createTargetMachine(triple.str(),
-                                                        mcpu_target(), mattrs(), options,
-                                                        llvm::Reloc::PIC_,
-                                                        llvm::CodeModel::Small,
-                                                        opt_level));
+        target_machine(llvm_target->createTargetMachine(
+#if LLVM_VERSION >= 210
+            triple,
+#else
+            triple.str(),
+#endif
+            mcpu_target(), mattrs(), options,
+            llvm::Reloc::PIC_,
+            llvm::CodeModel::Small,
+            CodeGenOptLevel::Aggressive));
 
     internal_assert(target_machine.get()) << "Could not allocate target machine!";
 
@@ -729,7 +731,7 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     using OptimizationLevel = llvm::OptimizationLevel;
     OptimizationLevel level = OptimizationLevel::O3;
 
-#if LLVM_VERSION >= 180 && LLVM_VERSION < 190
+#if LLVM_VERSION < 190
     target_machine->registerPassBuilderCallbacks(pb, /*PopulateClassToPassNames=*/false);
 #else
     target_machine->registerPassBuilderCallbacks(pb);
@@ -762,14 +764,9 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
 
     // Output string stream
 
-#if LLVM_VERSION >= 180
-    const auto file_type = ::llvm::CodeGenFileType::AssemblyFile;
-#else
-    const auto file_type = ::llvm::CGFT_AssemblyFile;
-#endif
     // Ask the target to add backend passes as necessary.
     bool fail = target_machine->addPassesToEmitFile(module_pass_manager, ostream, nullptr,
-                                                    file_type, true);
+                                                    CodeGenFileType::AssemblyFile, true);
     internal_assert(!fail) << "Failed to set up passes to emit PTX source\n";
     module_pass_manager.run(*module);
 

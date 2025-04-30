@@ -406,10 +406,10 @@ template<template<typename> class Functor, typename... Args>
 auto dynamic_type_dispatch(const halide_type_t &type, Args &&... args) -> decltype(std::declval<Functor<uint8_t>>()(std::forward<Args>(args)...)) {
 
 #define HANDLE_CASE(CODE, BITS, TYPE)  \
-    case halide_type_t(CODE, BITS).as_u32(): \
+    case halide_type_t(CODE, BITS).as_u64(): \
         return Functor<TYPE>()(std::forward<Args>(args)...);
 
-    switch (type.element_of().as_u32()) {
+    switch (type.element_of().as_u64()) {
         HANDLE_CASE(halide_type_bfloat, 16, bfloat16_t)
         HANDLE_CASE(halide_type_float, 16, float16_t)
         HANDLE_CASE(halide_type_float, 32, float)
@@ -522,16 +522,16 @@ struct wasm_halide_buffer_t {
     uint64_t device;
     wasm32_ptr_t device_interface;  // halide_device_interface_t*
     wasm32_ptr_t host;              // uint8_t*
-    uint64_t flags;
     halide_type_t type;
     int32_t dimensions;
+    uint32_t flags;
     wasm32_ptr_t dim;      // halide_dimension_t*
     wasm32_ptr_t padding;  // always zero
 };
 
-// static_assert(sizeof(halide_type_t) == 4, "halide_type_t");
-// static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
-// static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
+static_assert(sizeof(halide_type_t) == 8, "halide_type_t");
+static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
+static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
 
 #if WITH_WABT
 std::string to_string(const wabt::MemoryStream &m) {
@@ -662,9 +662,9 @@ void dump_wasmbuf(WabtContext &wabt_context, wasm32_ptr_t buf_ptr, const std::st
 // memory space and copy all relevant data. The resulting buf is laid out in
 // contiguous memory, and can be free with a single free().
 wasm32_ptr_t hostbuf_to_wasmbuf(WabtContext &wabt_context, const halide_buffer_t *src) {
-    // static_assert(sizeof(halide_type_t) == 4, "halide_type_t");
-    // static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
-    // static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
+    static_assert(sizeof(halide_type_t) == 8, "halide_type_t");
+    static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
+    static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
 
     wdebug(2) << "\nhostbuf_to_wasmbuf:\n";
     if (!src) {
@@ -1567,9 +1567,9 @@ void dump_wasmbuf(const Local<Context> &context, wasm32_ptr_t buf_ptr, const std
 // memory space and copy all relevant data. The resulting buf is laid out in
 // contiguous memory, and can be free with a single free().
 wasm32_ptr_t hostbuf_to_wasmbuf(const Local<Context> &context, const halide_buffer_t *src) {
-    // static_assert(sizeof(halide_type_t) == 4, "halide_type_t");
-    // static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
-    // static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
+    static_assert(sizeof(halide_type_t) == 8, "halide_type_t");
+    static_assert(sizeof(halide_dimension_t) == 16, "halide_dimension_t");
+    static_assert(sizeof(wasm_halide_buffer_t) == 40, "wasm_halide_buffer_t");
 
     wdebug(0) << "\nhostbuf_to_wasmbuf:\n";
     if (!src) {

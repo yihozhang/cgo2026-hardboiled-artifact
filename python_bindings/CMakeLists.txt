@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(Halide_Python VERSION 19.0.0)
+project(Halide_Python VERSION 20.0.0)
 
 if (PROJECT_IS_TOP_LEVEL)
     enable_testing()
@@ -47,7 +47,7 @@ cmake_dependent_option(
 find_package(Python 3.8 REQUIRED Interpreter Development.Module)
 
 if (WITH_PYTHON_BINDINGS)
-    find_package(pybind11 2.10.4 REQUIRED)
+    find_package(pybind11 2.11.1 REQUIRED)
 endif ()
 
 # Note: this must happen, especially when WITH_PYTHON_BINDINGS is OFF.

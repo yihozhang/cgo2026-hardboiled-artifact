@@ -1932,8 +1932,8 @@ void CodeGen_Hexagon::visit(const Call *op) {
             return;
         } else if (op->is_intrinsic(Call::dynamic_shuffle)) {
             internal_assert(op->args.size() == 4);
-            const int64_t *min_index = as_const_int(op->args[2]);
-            const int64_t *max_index = as_const_int(op->args[3]);
+            auto min_index = as_const_int(op->args[2]);
+            auto max_index = as_const_int(op->args[3]);
             internal_assert(min_index && max_index);
             Value *lut = codegen(op->args[0]);
             Value *idx = codegen(op->args[1]);
@@ -2228,10 +2228,6 @@ void CodeGen_Hexagon::visit(const Allocate *alloc) {
         Value *args[2] = {get_user_context(), llvm_size};
 
         Value *call = builder->CreateCall(alloc_fn, args);
-
-        // Fix the type to avoid pointless bitcasts later
-        call = builder->CreatePointerCast(
-            call, PointerType::get(llvm_type_of(alloc->type), 0));
         allocation.ptr = call;
 
         // Assert that the allocation worked.

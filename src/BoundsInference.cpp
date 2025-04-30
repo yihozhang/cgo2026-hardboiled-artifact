@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <numeric>
 
 namespace Halide {
 namespace Internal {
@@ -297,7 +298,6 @@ public:
             }
 
             // Default case (no specialization)
-            vector<Expr> predicates = def.split_predicate();
             for (const ReductionVariable &rv : def.schedule().rvars()) {
                 rvars.insert(rv);
             }
@@ -308,30 +308,21 @@ public:
             }
             vecs[1] = def.values();
 
+            vector<Expr> predicates = def.split_predicate();
             for (size_t i = 0; i < result.size(); ++i) {
                 for (const Expr &val : vecs[i]) {
-                    if (!predicates.empty()) {
-                        Expr cond_val = Call::make(val.type(),
-                                                   Internal::Call::if_then_else,
-                                                   {likely(predicates[0]), val},
-                                                   Internal::Call::PureIntrinsic);
-                        for (size_t i = 1; i < predicates.size(); ++i) {
-                            cond_val = Call::make(cond_val.type(),
-                                                  Internal::Call::if_then_else,
-                                                  {likely(predicates[i]), cond_val},
-                                                  Internal::Call::PureIntrinsic);
-                        }
-                        result[i].emplace_back(const_true(), cond_val);
-                    } else {
-                        result[i].emplace_back(const_true(), val);
-                    }
+                    Expr cond_val = std::accumulate(
+                        predicates.begin(), predicates.end(), val,
+                        [](const auto &acc, const auto &pred) {
+                            return Call::make(acc.type(), Call::if_then_else, {likely(pred), acc}, Call::PureIntrinsic);
+                        });
+                    result[i].emplace_back(const_true(), cond_val);
                 }
             }
 
-            const vector<Specialization> &specializations = def.specializations();
-            for (size_t i = specializations.size(); i > 0; i--) {
-                Expr s_cond = specializations[i - 1].condition;
-                const Definition &s_def = specializations[i - 1].definition;
+            for (const auto &s : reverse_view(def.specializations())) {
+                const Expr s_cond = s.condition;
+                const Definition &s_def = s.definition;
 
                 // Else case (i.e. specialization condition is false)
                 for (auto &vec : result) {
@@ -1309,12 +1300,11 @@ public:
                                  old_inner_productions.end());
 
         // Rewrap the let/if statements
-        for (size_t i = wrappers.size(); i > 0; i--) {
-            const auto &p = wrappers[i - 1];
-            if (p.first.empty()) {
-                body = IfThenElse::make(p.second, body);
+        for (const auto &[var, value] : reverse_view(wrappers)) {
+            if (var.empty()) {
+                body = IfThenElse::make(value, body);
             } else {
-                body = LetStmt::make(p.first, p.second, body);
+                body = LetStmt::make(var, value, body);
             }
         }
 

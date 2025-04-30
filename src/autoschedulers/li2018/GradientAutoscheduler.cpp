@@ -40,8 +40,8 @@ std::vector<int> get_int_bounds(const Box &bounds) {
         const Interval &interval = bounds[i];
         Expr extent = simplify(interval.max - interval.min + 1);
         extent = simplify(substitute_var_estimates(extent));
-        const int64_t *extent_int = as_const_int(extent);
-        user_assert(extent_int != nullptr)
+        auto extent_int = as_const_int(extent);
+        user_assert(extent_int)
             << "extent:" << extent << " is not constant.\n";
         int_bounds.push_back(*extent_int);
     }
@@ -53,8 +53,8 @@ std::vector<int> get_rvar_bounds(const std::vector<ReductionVariable> &rvars) {
     rvar_bounds.reserve(rvars.size());
     for (const auto &rvar : rvars) {
         Expr extent = simplify(substitute_var_estimates(rvar.extent));
-        const int64_t *extent_int = as_const_int(extent);
-        user_assert(extent_int != nullptr)
+        auto extent_int = as_const_int(extent);
+        user_assert(extent_int)
             << "extent:" << extent << " is not constant.\n";
         rvar_bounds.push_back(*extent_int);
     }
@@ -535,7 +535,7 @@ void parallelize_vars_and_rvars_cpu(
 template<typename FuncOrStage>
 void parallelize_vars_and_rvars(
     const GradientAutoschedulerParams &params,
-    FuncOrStage func_or_stage,
+    const FuncOrStage &func_or_stage,
     int natural_vector_size,
     bool is_pure_def,
     const std::vector<Var> &vars,
@@ -908,11 +908,11 @@ void generate_schedule(const std::vector<Function> &outputs,
 
     std::ostringstream schedule_source;
     // Traverse from the consumers to the producers
-    for (auto it = order.rbegin(); it != order.rend(); it++) {
-        Func func(env[*it]);
-        debug(1) << "[gradient_autoscheduler] Processing function:" << *it << "\n";
+    for (const auto &func_name : reverse_view(order)) {
+        Func func(env[func_name]);
+        debug(1) << "[gradient_autoscheduler] Processing function:" << func_name << "\n";
         // Get the bounds in integer constant by substitute all the parameters' estimates.
-        Box bounds = func_bounds[*it];
+        Box bounds = func_bounds[func_name];
         std::vector<int> int_bounds = get_int_bounds(bounds);
         // Scheduling pure definition
         apply_schedule(params, target, func, -1, int_bounds, target.has_gpu_feature(), schedule_source);

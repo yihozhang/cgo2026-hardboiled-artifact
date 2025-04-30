@@ -668,8 +668,8 @@ private:
                     const auto &candidate_group = mem_allocs[free_spaces[i]];
                     Expr size = alloc_size * alloc.type.bytes();
                     Expr dist = candidate_group.max_size * candidate_group.widest_type.bytes() - size;
-                    const int64_t *current_diff = as_const_int(simplify(dist));
-                    internal_assert(current_diff != nullptr);
+                    auto current_diff = as_const_int(simplify(dist));
+                    internal_assert(current_diff);
                     int64_t abs_diff = std::abs(*current_diff);
                     if ((free_idx == -1) || (abs_diff < diff)) {
                         diff = abs_diff;
@@ -1232,9 +1232,9 @@ class ExtractRegisterAllocations : public IRMutator {
                            op->param, mutate(op->predicate), op->alignment);
     }
 
-    template<typename ExprOrStmt, typename LetOrLetStmt>
-    ExprOrStmt visit_let(const LetOrLetStmt *op) {
-        ExprOrStmt body = op->body;
+    template<typename LetOrLetStmt>
+    auto visit_let(const LetOrLetStmt *op) -> decltype(op->body) {
+        auto body = op->body;
 
         body = mutate(op->body);
         Expr value = mutate(op->value);
@@ -1253,11 +1253,11 @@ class ExtractRegisterAllocations : public IRMutator {
     }
 
     Expr visit(const Let *op) override {
-        return visit_let<Expr>(op);
+        return visit_let(op);
     }
 
     Stmt visit(const LetStmt *op) override {
-        return visit_let<Stmt>(op);
+        return visit_let(op);
     }
 
     Scope<int> register_allocations;
