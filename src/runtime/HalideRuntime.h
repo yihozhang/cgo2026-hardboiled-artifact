@@ -516,14 +516,14 @@ struct halide_type_t {
 
     /** How many elements in a vector. This is 1 for scalar types. */
     HALIDE_ATTRIBUTE_ALIGN(2)
-    int32_t lanes;
+    uint16_t lanes;
 
 #if (__cplusplus >= 201103L || _MSVC_LANG >= 201103L)
     /** Construct a runtime representation of a Halide type from:
      * code: The fundamental type from an enum.
      * bits: The bit size of one element.
      * lanes: The number of vector elements in the type. */
-    HALIDE_ALWAYS_INLINE constexpr halide_type_t(halide_type_code_t code, uint8_t bits, int32_t lanes = 1)
+    HALIDE_ALWAYS_INLINE constexpr halide_type_t(halide_type_code_t code, uint8_t bits, uint16_t lanes = 1)
         : code(code), bits(bits), lanes(lanes) {
     }
 
@@ -533,7 +533,7 @@ struct halide_type_t {
         : code((halide_type_code_t)0), bits(0), lanes(0) {
     }
 
-    HALIDE_ALWAYS_INLINE constexpr halide_type_t with_lanes(int32_t new_lanes) const {
+    HALIDE_ALWAYS_INLINE constexpr halide_type_t with_lanes(uint16_t new_lanes) const {
         return halide_type_t((halide_type_code_t)code, bits, new_lanes);
     }
 
