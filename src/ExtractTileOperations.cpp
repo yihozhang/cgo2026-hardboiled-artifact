@@ -979,12 +979,12 @@ protected:
             return -1;
         }
         int vec_length = ramp->lanes;
-        const int64_t *basep = as_const_int(ramp->base);
-        if (!basep) {
+        const auto basep = as_const_int(ramp->base);
+        if (!basep.has_value()) {
             internal_error << "Only constant base is supported in AMX";
             return -1;
         }
-        int base = (int)*basep;
+        int base = basep.value();
         internal_assert(base % vec_length == 0) << "Cannot determine which AMX tile to load from";
         return base / vec_length;
     }
@@ -1212,15 +1212,15 @@ protected:
         if (call->name == "KWayInterleave") {
             std::vector<Expr> args = call->args;
             internal_assert(args.size() == 3);
-            const int64_t *pk = as_const_int(args[0]);
+            auto pk = as_const_int(args[0]);
             Expr vec = mutate(args[1]);
-            const int64_t *planes = as_const_int(args[2]);
-            if (!pk || !planes) {
+            auto planes = as_const_int(args[2]);
+            if (!pk.has_value() || !planes.has_value()) {
                 internal_error << "KWayInterleave requires constant k and lanes\n";
                 return {};
             }
-            int K = *pk;
-            int lanes = *planes;
+            int K = pk.value();
+            int lanes = planes.value();
             internal_assert(vec.type().lanes() % lanes == 0) << "Vector size must be a multiple of #lanes\n";
             internal_assert(lanes % K == 0) << "Number of lanes must be a multiple of k\n";
             int length = vec.type().lanes() / lanes;
@@ -1241,22 +1241,24 @@ protected:
             const auto *var = args[0].as<Variable>();
             auto base_r = args[1];
             auto stride_r = args[2];
-            const auto *l1 = as_const_int(args[3]);
-            const auto *l2 = as_const_int(args[4]);
-            if (!(var && l1 && l2)) {
+            const auto l1_opt = as_const_int(args[3]);
+            const auto l2_opt = as_const_int(args[4]);
+            if (!(var && l1_opt.has_value() && l2_opt.has_value())) {
                 internal_error << "ConvolutionShuffle: arguments have unexpected type\n";
                 return Expr();
             }
-            auto ty = Float(16, *l1);
-            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, *l1), {}, {}, const_true(*l1), {});
+            auto l1 = l1_opt.value();
+            auto l2 = l2_opt.value();
+            auto ty = Float(16, l1);
+            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, l1), {}, {}, const_true(l1), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
-            for (int j = 0; j < *l1 + *l2; j++) {
-                for (int i = 0; i < *l2; i++) {
-                    if (0 <= j - i && j - i < *l1) {
+            for (int j = 0; j < l1 + l2; j++) {
+                for (int i = 0; i < l2; i++) {
+                    if (0 <= j - i && j - i < l1) {
                         indices.push_back(j - i);
                     } else {
-                        indices.push_back(*l1);
+                        indices.push_back(l1);
                     }
                 }
             }
