@@ -1,6 +1,7 @@
 #include "Halide.h"
 #include "halide_benchmark.h"
 #include "halide_test_dirs.h"
+#include "matrix_generator.h"
 
 #include <iomanip>
 #include <iostream>
@@ -116,7 +117,40 @@ bool matmul_bf16(Halide::Target target) {
             .vectorize(mmyi);
     }
     Func result = mm.in();
-    result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
+    // result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B, C}, HTML, target);
+
+    if (1) {
+        bool use_gpu = true;
+        int row = 512;
+        int col = 512;
+        
+        Buffer<float16_t> a_buf(acc, row);
+        fill_buffer_flat(a_buf, row, acc);
+        A.set(a_buf);
+        Buffer<float16_t> b_buf(acc, acc);
+        fill_buffer_flat(b_buf, acc, acc);
+        B.set(b_buf);
+        Buffer<float16_t> c_buf(col, acc);
+        fill_buffer_flat(c_buf, acc, col);
+        C.set(c_buf);
+
+
+
+        // NB: if col is 7 (whcih it is supposed to be), then the CUDA kernel
+        // crashes with "misaligned address"
+        // This is another question to ask during the meeting that why the "residual"
+        // part is not computed outside of TensorCore.
+        // Buffer<float> out(col - acc, row);
+        Buffer<float16_t> out(col, row);
+        // out.crop(0, 0, col - acc + 1);
+        auto time = Tools::benchmark(5, 5, [&]() {
+            result.realize(out, target);
+            if (use_gpu) {
+                out.device_sync();
+            }
+        });
+        std::cout << "Time: " << time << "ms\n";
+    }
 
     std::cout << "Success!\n";
     return true;
