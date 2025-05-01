@@ -674,8 +674,12 @@ namespace EqSatExtensions {
 Location from_memory_type(MemoryType memtype) {
     if (memtype == MemoryType::AMXTile) {
         return Location::AMX;
-    } else if (memtype == MemoryType::WMMAAccumulator || memtype == MemoryType::WMMAA || memtype == MemoryType::WMMAB) {
-        return Location::WMMA;
+    } else if (memtype == MemoryType::WMMAAccumulator) {
+        return Location::WMMA_C;
+    } else if (memtype == MemoryType::WMMAA) {
+        return Location::WMMA_A;
+    } else if (memtype == MemoryType::WMMAB) {
+        return Location::WMMA_B;
     } else {
         return Location::Mem;
     }
@@ -805,6 +809,23 @@ public:
             free_vars.mutate(this->expr);
             this->free_vars = free_vars.free_vars;
         }
+
+        Type type() {
+            const Call *call_stmt = this->expr.as<Call>();
+            if (call_stmt && call_stmt->name.find("wmma.store.d") != string::npos) {
+                int bits;
+                if (call_stmt->name.substr(call_stmt->name.length() - 2) == "32") {
+                    bits = 32;
+                } else if (call_stmt->name.substr(call_stmt->name.length() - 2) == "16") {
+                    bits = 16;
+                } else {
+                    internal_error << "Cannot tell the type of the tile to be stored";
+                }
+                return Float(bits, 256);
+            } else {
+                return this->expr.type();
+            }
+        }
     };
     explicit RemoveGLoadsAndGVars(const std::string &prefix)
         : prefix(prefix) {
@@ -878,9 +899,20 @@ struct SubstStores : public EqSatIRMutator {
             auto &prologue = *it;
             // Find the first place where not every variable is available.
             if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
-                const int lanes = prologue.expr.type().lanes();
-                body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-                body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
+                const int lanes = prologue.type().lanes();
+                Stmt store_stmt;
+
+                const Call *call_stmt = prologue.expr.as<Call>();
+                if (call_stmt && call_stmt->name.find("wmma.store.d") != string::npos) {
+                    vector<Expr> args = call_stmt->args;
+                    args[0] = Variable::make(Handle(), prologue.name);
+                    store_stmt = Evaluate::make(Call::make(call_stmt->type, call_stmt->name, args, call_stmt->call_type));
+                    std::cerr << store_stmt;
+                } else {
+                    store_stmt = Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
+                }
+                body = Block::make(store_stmt, body);
+                body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 it = pending_definitions.erase(it);
             } else {
                 ++it;
@@ -1070,6 +1102,8 @@ class EnforceWMMALanes : public IRMutator {
         {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
+        {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4)},
+        {"wmma.load.c.sync.aligned.row.m32n8k16.f16", Float(32, 4)},
     };
 
     Expr get_nth_tile_from_tile_index_wmma(const Expr &e) {
@@ -1097,6 +1131,9 @@ protected:
 
             auto body = mutate(op->body);
             auto lanes = op->constant_allocation_size() / 32;
+            if (op->type.bits() == 16) {
+                lanes /= 2;
+            }
             Type type = op->memory_type == MemoryType::WMMAAccumulator ? Float(32) : Int(32);
             return Allocate::make(op->name,
                                   type,
@@ -1136,7 +1173,7 @@ protected:
                 op->param);
         } else if (ends_with(op->name, ".ZERO") && starts_with(op->name, "wmma.load.c.sync.aligned.")) {
             wmma_used = true;
-            return make_zero(Float(32, 8));
+            return op->name.find(".f32.") != string::npos ? make_zero(Float(32, 8)) : make_zero(Float(32, 4));
         } else {
             if (starts_with(op->name, "wmma.store.d.sync.aligned.")) {
                 wmma_used = true;
@@ -1150,12 +1187,14 @@ protected:
         if (it != tile_vars.end()) {
             internal_assert(load->type.lanes() % 32 == 0);
             auto nth = get_nth_tile_from_tile_index_wmma(load->index);
-            int tile_lanes = load->type.lanes() / 32;
+            int tile_lanes = load->type.lanes() / 32 / (load->type.bits() == 32 ? 1 : 2);
             MemoryType mt = it->second;
             Type tile_type = mt == MemoryType::WMMAAccumulator ? Float(32, tile_lanes) : Int(32, tile_lanes);
+            // If the accumulator is float 16, each tile takes 4 lanes instead of 8
+            int tile_multiple = load->type.bits() == 32 ? 8 : 4;
             return Load::make(tile_type,
                               load->name,
-                              Ramp::make(nth * 8, 1, tile_lanes),
+                              Ramp::make(nth * tile_multiple, 1, tile_lanes),
                               load->image,
                               load->param,
                               const_true(tile_lanes),
@@ -1180,7 +1219,8 @@ protected:
         if (tile_vars.find(store->name) != tile_vars.end()) {
             internal_assert(is_const_one(store->predicate)) << "Only constant predicate is supported";
             internal_assert(store->value.type().lanes() % 32 == 0);
-            int tile_lanes = store->value.type().lanes() / 32;
+            int tile_multiple = store->value.type().bits() == 32 ? 8 : 4;
+            int tile_lanes = store->value.type().lanes() / 32 / (store->value.type().bits() == 32 ? 1 : 2);
             auto nth = get_nth_tile_from_tile_index_wmma(store->index);
 
             // There should not be a Load in places other than value,
@@ -1189,10 +1229,11 @@ protected:
             Expr value = mutate(store->value);
             internal_assert(wmma_used);
             wmma_used = false;
+            
             auto op = Store::make(
                 store->name,
                 value,
-                Ramp::make(nth * 8, 1, tile_lanes),
+                Ramp::make(nth * tile_multiple, 1, tile_lanes),
                 store->param,
                 const_true(tile_lanes),
                 store->alignment);

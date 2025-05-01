@@ -192,6 +192,19 @@
     ))
 
 (rule (
+    (= e (WMMA2Mem wmma-expr))
+    (WMMAShape wmma-expr n-lanes k-lanes)
+    (has-type e (Float bits 256))
+    (WMMATileD (Tile n-lanes _m k-lanes) intrinsic bits)
+) (
+    (let load-var (ExprVar (Mem)
+        (Call intrinsic (Int 32 1) (vec-of (Var (Handle 1) (V "DUMMY_STORE_NAME")) wmma-expr (IntImm32 0) (IntImm32 k-lanes)))))
+    (let index (Ramp (Ramp (IntImm32 0) (IntImm32 1) k-lanes) (Broadcast (IntImm32 k-lanes) k-lanes) n-lanes))
+    (let new-e (Load (Float bits (* n-lanes k-lanes)) load-var index))
+    (union e new-e)
+))
+
+(rule (
         (= s (Store store-name (WMMA2Mem tile) index))
         (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
         (has-type tile (Float bits _lanes))

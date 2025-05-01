@@ -18,8 +18,9 @@ namespace EqSatExtensions {
 enum class Location {
     Mem,
     AMX,
-    WMMA,
-
+    WMMA_A,
+    WMMA_B,
+    WMMA_C,
 };
 
 Location from_memory_type(MemoryType memtype);

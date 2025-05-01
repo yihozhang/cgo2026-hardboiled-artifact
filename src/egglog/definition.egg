@@ -7,7 +7,9 @@
 (datatype Loc 
     (Mem) ; This is where the generic computation happens
     (AMX) ; AMX tiles
-    (WMMA) ; CUDA Warp-level Matrix Multiplication registers
+    (WMMA_A) ; CUDA Warp-level Matrix Multiplication registers
+    (WMMA_B)
+    (WMMA_C)
 )
 
 (datatype BinOp
@@ -115,8 +117,8 @@
 
 (birewrite (Mem2AMX e) (Loc2Loc (Mem) (AMX) e))
 (birewrite (AMX2Mem e) (Loc2Loc (AMX) (Mem) e))
-(birewrite (WMMA2Mem e) (Loc2Loc (WMMA) (Mem) e))
-(birewrite (Mem2WMMA e) (Loc2Loc (Mem) (WMMA) e))
+(birewrite (WMMA2Mem e) (Loc2Loc (WMMA_C) (Mem) e))
+(birewrite (Mem2WMMA e) (Loc2Loc (Mem) (WMMA_C) e))
 (rewrite (Loc2Loc a b (Loc2Loc b a e)) e)
 
 (function ExprVar (Loc Expr) Variable)

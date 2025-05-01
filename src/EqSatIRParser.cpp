@@ -26,7 +26,7 @@ Expr EqSatIRParser::parse_expr() {
         auto type = parse_type();
         auto expr = parse_expr();
         result = Cast::make(type, expr);
-    } else if (is_head("ReInterpret")) {
+    } else if (is_head("Reinterpret")) {
         auto type = parse_type();
         auto expr = parse_expr();
         result = Reinterpret::make(type, expr);

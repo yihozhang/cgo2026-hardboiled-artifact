@@ -176,8 +176,12 @@ std::string string_from_loc(EqSatExtensions::Location loc) {
         return "(Mem)";
     case EqSatExtensions::Location::AMX:
         return "(AMX)";
-    case EqSatExtensions::Location::WMMA:
-        return "(WMMA)";
+    case EqSatExtensions::Location::WMMA_C:
+        return "(WMMA_C)";
+    case EqSatExtensions::Location::WMMA_A:
+        return "(WMMA_A)";
+    case EqSatExtensions::Location::WMMA_B:
+        return "(WMMA_B)";
     }
 }
 
