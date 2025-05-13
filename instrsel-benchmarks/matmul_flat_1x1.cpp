@@ -26,8 +26,8 @@ bool matmul_bf16(Halide::Target target) {
     if (target.has_feature(Target::AVX512_SapphireRapids)) {
         Func A("A");
         Func B("B");
-        A(x, y) = cast<bfloat16_t>(A(x, y));
-        B(x, y) = cast<bfloat16_t>(B(x, y));
+        A(x, y) = cast<bfloat16_t>(A_input(x, y));
+        B(x, y) = cast<bfloat16_t>(B_input(x, y));
 
         mm(x, y) = cast<float>(0);
         mm(x, y) += cast<float>(cast<float>(A(r.x, y))) * cast<float>(B(x, r.x));
@@ -36,6 +36,9 @@ bool matmul_bf16(Halide::Target target) {
         int tile_r = 16;
         Var rxi("rxi"), ryi("ryi");
         RVar rri("rri"), rro("rro");
+
+        A.compute_root().tile(x, y, rxi, ryi, tile_x, tile_y);
+        B.compute_root().tile(x, y, rxi, ryi, tile_x, tile_y);
 
         mm.compute_at(mm.in(), x)
             .store_in(MemoryType::AMXTile)
@@ -273,11 +276,11 @@ bool matmul_bf16(Halide::Target target) {
 
 int main(int argc, char **argv) {
     freopen("/tmp/matmul_flat_1x1.log", "w", stderr);
-    // Target target("x86-64-linux-avx512_sapphirerapids");
+    Target target("x86-64-linux-avx512_sapphirerapids");
     // Target target("x86-64-linux-cuda_capability_70");
-    Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability70)
+    // Target target = get_target_from_environment().with_feature(Target::CUDA).with_feature(Target::CUDACapability70)
         // .with_feature(Target::Debug)
-        ;
+        // ;
     // Target target = get_jit_target_from_environment();
     std::cout << target;
 
