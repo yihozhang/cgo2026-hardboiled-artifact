@@ -10,3 +10,6 @@ tests(GROUPS instrsel-benchmarks
         matmul_vnni_2x2.cpp
         convolution.cpp
 )
+
+# Disable PCH for this target
+set_target_properties(instrsel-benchmarks_convolution PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
