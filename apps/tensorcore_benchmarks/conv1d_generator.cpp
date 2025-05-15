@@ -64,8 +64,7 @@ public:
                   .gpu_blocks(bx, by)
                   .gpu_threads(tx, ty)
                   .unroll(txi)
-                  .unroll(tyi)
-                  ;
+                  .unroll(tyi);
 
             /*------------------------------------------------------------------*
             |  2.  Scheduling the pure definition of conv                      |
@@ -136,8 +135,7 @@ public:
                 .vectorize(rkxi)
                 .vectorize(txi)
                 .vectorize(tyi)
-                .unroll(rkxo)
-                ;
+                .unroll(rkxo);
         }
     }
 

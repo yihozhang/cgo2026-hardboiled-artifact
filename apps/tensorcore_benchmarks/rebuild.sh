@@ -4,6 +4,7 @@ set -euo pipefail
 # Default values
 BENCHMARK="conv1d"
 TARGET="win"
+SCHEDULE="cuda_only"
 
 # Help message
 show_help() {
@@ -11,14 +12,16 @@ show_help() {
     echo "Build Halide benchmarks for different targets"
     echo ""
     echo "Options:"
-    echo "  -b, --benchmark NAME    Benchmark to build (conv1d or conv2d) [default: conv1d]"
-    echo "  -t, --target TARGET     Target architecture (host, win, or linux) [default: host]"
-    echo "  -h, --help             Show this help message"
+    echo "  -b, --benchmark NAME        Benchmark to build (conv1d or conv2d) [default: conv1d]"
+    echo "  -t, --target TARGET         Target architecture (host, win, or linux) [default: host]"
+    echo "  -s, --schedule SCHEDULE     Schedule to use (cuda_only or tensorcore) [default: cuda_only]"
+    echo "  -h, --help                  Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 -b conv1d -t win     # Build conv1d for Windows"
-    echo "  $0 -b conv2d -t linux   # Build conv2d for Linux"
-    echo "  $0                      # Build conv1d for host (default)"
+    echo "  $0 -b conv1d -t win                  # Build conv1d for Windows"
+    echo "  $0 -b conv2d -t linux                # Build conv2d for Linux"
+    echo "  $0 -b conv2d -t linux -s tensorcore  # Build conv2d for Linux with tensorcore schedule"
+    echo "  $0                                   # Build conv1d for host (default)"
 }
 
 # Parse command line arguments
@@ -30,6 +33,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--target)
             TARGET="$2"
+            shift 2
+            ;;
+        -s|--schedule)
+            SCHEDULE="$2"
             shift 2
             ;;
         -h|--help)
@@ -62,6 +69,7 @@ echo "Building $BENCHMARK for $TARGET target..."
 rm -rf build
 cmake -S . -B build \
     -DCMAKE_PREFIX_PATH=../../halide-install \
+    -DSCHEDULE=$SCHEDULE \
     -DCMAKE_BUILD_TYPE=Release
 
 # Build based on target

@@ -34,7 +34,7 @@ public:
     }
 
     void schedule() {
-        if (true) {
+        if (false) {
             Var xi("xi"), yi("yi");
             RVar rxi("rxi"), ryi("ryi");
             Var mmxi("mmxi"),
@@ -74,9 +74,9 @@ public:
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 128;
-            const int blockTileY = 8;
-            const int threadTileX = 4;
+            const int blockTileX = 32;
+            const int blockTileY = 32;
+            const int threadTileX = 2;
             const int threadTileY = 2;
             const int reductionTileX = 8;
             const int reductionTileY = 8;

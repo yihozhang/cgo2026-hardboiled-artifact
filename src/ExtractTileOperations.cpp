@@ -883,6 +883,34 @@ protected:
     }
 };
 
+struct SubstKernelLoads : public EqSatIRMutator {
+    using EqSatIRMutator::visit;
+
+    SubstKernelLoads(std::string old_buffer_name, std::string new_buffer_name, Expr offset) {
+        this->old_buffer_name = old_buffer_name;
+        this->new_buffer_name = new_buffer_name;
+        this->offset = offset;
+    }
+
+    Expr visit(const Call* call) override {
+        // Check all loads
+        if (starts_with(call->name, "wmma.load")) {
+            const Variable* buff = call->args[0].as<Variable>();
+            if (buff && buff->name == old_buffer_name) {
+                std::vector<Expr> args = call->args;
+                args[0] = Variable::make(args[0].type(), new_buffer_name);
+                args[1] = args[1] + offset;
+                return Call::make(call->type, call->name, args, call->call_type, call->func, call->value_index, call->image, call->param);
+            }            
+        }
+        return EqSatIRMutator::visit(call);
+    }
+
+    std::string old_buffer_name;
+    std::string new_buffer_name;
+    Expr offset;
+};
+
 struct SubstStores : public EqSatIRMutator {
     using EqSatIRMutator::visit;
     const std::map<std::string, Stmt> &stores;
@@ -895,96 +923,7 @@ struct SubstStores : public EqSatIRMutator {
             inside_gpu_kernel.push(false);
     }
 
-    void merge_convolution_shuffles() {
-        // Find all pending_definitions that can be inserted here and are ConvolutionShuffle calls
-        std::vector<size_t> to_merge_indices;
-        for (size_t idx = 0; idx < pending_definitions.size(); ++idx) {
-            auto &prologue = pending_definitions[idx];
-            // Check if all free_vars are available (or kernel_root, if you have that in scope)
-            if (std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
-                const Call *call_stmt = prologue.expr.as<Call>();
-                if (call_stmt && call_stmt->name == "ConvolutionShuffle") {
-                    to_merge_indices.push_back(idx);
-                }
-            }
-        }
-        // If any found, remove them and insert a single TODO entry
-        if (!to_merge_indices.empty()) {
-            // Gather the actual prologues to merge
-            std::vector<RemoveGLoadsAndGVars::PrologueStmt> merge_candidates;
-            for (size_t idx : to_merge_indices) {
-                merge_candidates.push_back(pending_definitions[idx]);
-            }
-
-            // Check all have the same buffer (first arg)
-            bool can_merge = true;
-            const Call* first_call = merge_candidates[0].expr.as<Call>();
-            Expr buffer = first_call->args[0];
-            Expr base = first_call->args[1];
-            Expr stride = first_call->args[2];
-            Expr length = first_call->args[3];
-
-            for (size_t i = 1; i < merge_candidates.size(); ++i) {
-                const Call* call = merge_candidates[i].expr.as<Call>();
-                if (!equal(call->args[0], buffer) ||
-                    !equal(call->args[2], stride) ||
-                    !equal(call->args[3], length)) {
-                    can_merge = false;
-                    break;
-                }
-            }
-
-            // Check contiguity
-            if (can_merge) {
-                for (size_t i = 1; i < merge_candidates.size(); ++i) {
-                    const Call* prev = merge_candidates[i-1].expr.as<Call>();
-                    const Call* curr = merge_candidates[i].expr.as<Call>();
-                    Expr prev_base = prev->args[1];
-                    Expr curr_base = curr->args[1];
-                    Expr expected = simplify(prev_base + length * stride);
-                    if (!equal(curr_base, expected)) {
-                        can_merge = false;
-                        break;
-                    }
-                }
-            }
-
-            if (can_merge) {   
-                int num_shuffles = static_cast<int>(merge_candidates.size());
-                Expr merged_length = simplify(length * num_shuffles);
-
-                // Create the merged ConvolutionShuffle call
-                std::vector<Expr> merged_args = {buffer, base, stride, merged_length, first_call->args[4], length};
-                Expr merged_call = Call::make(
-                    first_call->type.with_lanes(merged_length.as<IntImm>()->value), // or use the correct type
-                    "MultiConvolutionShuffle",
-                    merged_args,
-                    first_call->call_type,
-                    first_call->func,
-                    first_call->value_index,
-                    first_call->image,
-                    first_call->param
-                );
-
-                // Remove all mergeable from pending_definitions (reverse order)
-                for (auto it = to_merge_indices.rbegin(); it != to_merge_indices.rend(); ++it) {
-                    pending_definitions.erase(pending_definitions.begin() + *it);
-                }
-
-                // Insert the merged prologue
-                RemoveGLoadsAndGVars::PrologueStmt merged_prologue(
-                    merge_candidates.front().name,
-                    merged_call
-                );
-
-                pending_definitions.push_back(std::move(merged_prologue));
-            }
-            
-        }
-        // ... existing code ...
-    }
-
-    auto merge_convolution_shuffles2(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues) {
+    auto merge_convolution_shuffles(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues, Stmt& s) {
         // If the prologue is a ConvolutionShuffle call, we can merge it with an existing pending_definition
         // if it reads from contiguous memory locations
         std::vector<RemoveGLoadsAndGVars::PrologueStmt> rem_prologues;
@@ -1037,7 +976,12 @@ struct SubstStores : public EqSatIRMutator {
                                 existing_call->param
                             );
 
+                            int offset = existing_call->type.lanes();
+
                             pending_definition.expr = simplify(merged_call);
+
+                            SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, offset);
+                            s = subst_kernel_loads.mutate(s);
 
                             merged = true;
                             break;
@@ -1053,12 +997,12 @@ struct SubstStores : public EqSatIRMutator {
         return rem_prologues;
     }
 
-    Stmt insert_pending_definitions(Stmt body, bool kernel_root = false) {
+    Stmt insert_pending_definitions(Stmt body) {
         auto it = pending_definitions.begin();
         while (it != pending_definitions.end()) {
             auto &prologue = *it;
             // Find the first place where not every variable is available (or we are at the root of the GPU kernel)
-            if (std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end()) || kernel_root) {
+            if (std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
                 const int lanes = prologue.type().lanes();
                 Stmt store_stmt;
 
@@ -1070,70 +1014,45 @@ struct SubstStores : public EqSatIRMutator {
                     std::cerr << store_stmt;
                     body = Block::make(store_stmt, body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
-                } else if (call_stmt && call_stmt->name == "ConvolutionShuffle") {
-                    if (call_stmt->args.size() == 5) {
-                        Expr dist_expr = Call::make(
-                            call_stmt->type.with_lanes(lanes/16),
-                            "DistributedConvolutionShuffle",
-                            call_stmt->args,
-                            call_stmt->call_type,
-                            call_stmt->func,
-                            call_stmt->value_index,
-                            call_stmt->image,
-                            call_stmt->param
-                        );
-                        store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") * (lanes/16), 1, lanes/16), Parameter(), const_true(lanes/16), ModulusRemainder());
-                        store_stmt = For::make("conv_shuffle.thread_id_x", 0, 16, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
-                        body = Block::make(store_stmt, body);
-                        body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);    
-                    } else {
-                        Expr dist_expr = Call::make(
-                            call_stmt->type.with_lanes(lanes/32),
-                            "DistributedConvolutionShuffle",
-                            call_stmt->args,
-                            call_stmt->call_type,
-                            call_stmt->func,
-                            call_stmt->value_index,
-                            call_stmt->image,
-                            call_stmt->param
-                        );
-                        std::cout << "Dist multi expr: " << dist_expr << std::endl;
-                        store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") * (lanes/32), 1, lanes/32), Parameter(), const_true(lanes/32), ModulusRemainder());
-                        store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
-                        body = Block::make(store_stmt, body);
-                        body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
-                    }
+                } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
+                    Expr dist_expr = Call::make(
+                        call_stmt->type.with_lanes(lanes/32),
+                        "DistributedConvolutionShuffle",
+                        call_stmt->args,
+                        call_stmt->call_type,
+                        call_stmt->func,
+                        call_stmt->value_index,
+                        call_stmt->image,
+                        call_stmt->param
+                    );
+                    store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") * (lanes/32), 1, lanes/32), Parameter(), const_true(lanes/32), ModulusRemainder());
+                    store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
+                    body = Block::make(store_stmt, body);
+                    body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 } else {
                     store_stmt = Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
                     body = Block::make(store_stmt, body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 }
+                
                 it = pending_definitions.erase(it);
             } else {
                 ++it;
             }
         }
-
-        // for (auto &prologue: pending_definitions) {
-        //     const int lanes = prologue.expr.type().lanes();
-        //     body = Block::make(Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder()), body);
-        //     body = Allocate::make(prologue.name, prologue.expr.type().with_lanes(1), MemoryType::Auto, {prologue.expr.type().lanes()}, const_true(prologue.expr.type().lanes()), body);
-        // }
-        // pending_definitions.clear();
         
         return body;
     }
 
     Stmt visit(const For *op) override {
-        bool kernel_root = false;//inside_gpu_kernel.top();
         inside_gpu_kernel.push(op->for_type == ForType::GPUBlock);
 
         const string name = op->name;
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
-        avail_vars.erase(name);
 
-        body = insert_pending_definitions(body, kernel_root);
+        body = insert_pending_definitions(body);
+        avail_vars.erase(name);
         
         inside_gpu_kernel.pop();
 
@@ -1163,16 +1082,9 @@ struct SubstStores : public EqSatIRMutator {
         RemoveGLoadsAndGVars remover(prefix);
         s = remover.mutate(s);
 
-        auto prologues = merge_convolution_shuffles2(remover.get_prologues());
+        auto prologues = merge_convolution_shuffles(remover.get_prologues(), s);
 
         pending_definitions.insert(pending_definitions.end(), prologues.begin(), prologues.end());
-
-        std::cout << "================================================" << std::endl;
-        std::cout << "Pending definitions:" << std::endl;
-        for (const auto& prologue : pending_definitions) {
-            std::cout << "name: " << prologue.name << std::endl;
-            std::cout << "expr: " << prologue.expr << std::endl;
-        }
 
         return s;
     }
@@ -1462,6 +1374,7 @@ protected:
     Stmt visit(const Store *store) override {
         const Call *rhs = store->value.as<Call>();
         if (rhs && rhs->name == "DistributedConvolutionShuffle") {
+            std::cout << "DistributedConvolutionShuffle: " << store->value << std::endl;
             const std::vector<Expr> &args = store->value.as<Call>()->args;
             internal_assert(args.size() == 6);
             const auto *var = args[0].as<Variable>();
@@ -1476,26 +1389,29 @@ protected:
             }
             auto taps = kernel_taps.value() / tile_cnt.value();
             auto pixels = pixels_cnt.value();
+            auto mat_cnt = tile_cnt.value();
             auto ty = Float(16, pixels);
 
-            int shuffles_per_lane = rhs->type.lanes();
             /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so 
                it works for now */
             int out_matrix_rows = (pixels + taps);
-            int out_matrix_cols = pixels;
-            int out_matrix_size = out_matrix_rows * out_matrix_cols;
 
-            // todo(maaz): We currently only handle cases where out_matrix_size is twice the shuffles_per_lane
-            internal_assert(out_matrix_size == 2 * shuffles_per_lane);
+            // todo(maaz): We currently only handle cases where lanes are divisible by mat_cnt
+            internal_assert(32 % mat_cnt == 0);
 
-            int rows_per_lane = out_matrix_rows / 2;
+            int rows_per_lane = (out_matrix_rows *  mat_cnt)/ 32;
+            int wlanes_per_mat = 32 / mat_cnt;
 
             std::vector<Stmt> stores;
             for (int warp_lane=0; warp_lane<32; warp_lane++) {
-                int row_base = (warp_lane % 2) * rows_per_lane;
+                int mat_id = warp_lane / wlanes_per_mat;
+                int row_base = (warp_lane % wlanes_per_mat) * rows_per_lane;
                 int row_max = row_base + rows_per_lane;
 
-                Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r + IntImm::make(Int(32), warp_lane * taps), stride_r, taps), {}, {}, const_true(taps), {});
+                Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r + IntImm::make(Int(32), mat_id * taps), stride_r, taps), {}, {}, const_true(taps), {});
+                //Expr thread_id = Variable::make(Int(32), "conv_shuffle.thread_id_x");
+                //Expr koffset = (thread_id / wlanes_per_mat) * 8;
+                //Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r + koffset, stride_r, taps), {}, {}, const_true(taps), {});
                 Expr vec2 = FloatImm::make(Float(16), 0);
                 
                 vector<int> indices;
@@ -1513,12 +1429,13 @@ protected:
                 auto v = Shuffle::make({vec1, vec2}, indices);
 
                 // Make the store
-                Stmt new_store = Store::make(store->name, v, store->index + (warp_lane * shuffles_per_lane), store->param, store->predicate, store->alignment);
-                
+                Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
+
                 // conditional block
                 Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") == warp_lane, new_store);
                 
                 stores.push_back(cond);
+                //return new_store;
             }
             
             
@@ -1677,6 +1594,9 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     // post-processing
     EqSatExtensions::SubstStores subst_stores(std::move(new_stores));
     result = subst_stores.mutate(result);
+    for (auto pending_definition : subst_stores.pending_definitions) {
+        std::cout << "pending_definition: " << pending_definition.expr << std::endl;
+    }
     internal_assert(subst_stores.pending_definitions.empty());
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);

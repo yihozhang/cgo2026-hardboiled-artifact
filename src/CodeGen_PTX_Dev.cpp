@@ -396,6 +396,7 @@ void CodeGen_PTX_Dev::visit(const AssertStmt *op) {
 }
 
 void CodeGen_PTX_Dev::visit(const Load *op) {
+    std::cout << "Genning a Load " << op->name << " " << op->index << std::endl;
 
     // Do aligned 4-wide 32-bit loads as a single i128 load.
     const Ramp *r = op->index.as<Ramp>();
@@ -406,6 +407,18 @@ void CodeGen_PTX_Dev::visit(const Load *op) {
             Expr index = simplify(r->base / 4);
             Expr equiv = Load::make(UInt(128), op->name, index,
                                     op->image, op->param, const_true(), align / 4);
+            equiv = reinterpret(op->type, equiv);
+            codegen(equiv);
+            return;
+        }
+    }
+    // added a case for 8-wide ramp of 16-bit loads as a single i128 load.
+    if (is_const_one(op->predicate) && r && is_const_one(r->stride) && r->lanes == 8 && op->type.bits() == 16) {
+        ModulusRemainder align = op->alignment;
+        if (align.modulus % 4 == 0 && align.remainder % 4 == 0) {
+            Expr index = simplify(r->base / 8);
+            Expr equiv = Load::make(UInt(128), op->name, index,
+                                    op->image, op->param, const_true(), align / 8);
             equiv = reinterpret(op->type, equiv);
             codegen(equiv);
             return;

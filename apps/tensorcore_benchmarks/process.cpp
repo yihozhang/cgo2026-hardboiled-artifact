@@ -6,11 +6,11 @@
 #include <iostream>                                                   
 #include <cstdlib>  // for rand()                                     
                                                                       
-#ifndef CONV1D_HEADER                                                 
-#error "CONV1D_HEADER must be defined"                                
+#ifndef BENCHMARK_HEADER                                                 
+#error "BENCHMARK_HEADER must be defined"                                
 #endif                                                                
                                                                       
-#include CONV1D_HEADER                                                
+#include BENCHMARK_HEADER                                                
                                                                       
 using namespace Halide::Runtime;                                      
 using namespace Halide::Tools;               
@@ -28,8 +28,10 @@ int main(int argc, char **argv) {
     const int kSize = KERNEL_SIZE;                                    
     const int imgW = IMG_COL;                                         
     const int imgH = IMG_ROW;                                         
-                                                                      
-    std::cout << "Running convolution with:" << std::endl;            
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;            
     std::cout << "  Kernel size: " << kSize << std::endl;             
     std::cout << "  Image size: " << imgW << "x" << imgH << std::endl;
     std::cout << "  Schedule: " << SCHEDULE << std::endl;             
@@ -53,10 +55,18 @@ int main(int argc, char **argv) {
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
+
+#if defined(RUN_conv1d)
         conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+#elif defined(RUN_conv2d)
+        conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+#else
+    #error "Unknown benchmark type"
+#endif
+
         output.device_sync();
     });
-
+    
     if (output.has_device_allocation()) {
         output.copy_to_host();
     }
@@ -84,7 +94,7 @@ int main(int argc, char **argv) {
             std::cout << "Outputs match!\n";
             return 0;
         } else {
-            std::cerr << "Outputs do not match...\n";
+            std::cout << "Outputs do not match...\n";
             return 1;
         }
     }
