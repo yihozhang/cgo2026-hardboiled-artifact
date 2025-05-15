@@ -10,8 +10,8 @@ set(CMAKE_CXX_EXTENSIONS NO)
 
 # Conv parameters
 set(CONV_KERNEL_SIZE 128 CACHE STRING "Size of the convolution kernel")
-set(CONV_IMG_ROW 61440 CACHE STRING "Height of the input image")
-set(CONV_IMG_COL 34560 CACHE STRING "Width of the input image")
+set(CONV_IMG_ROW 4096 CACHE STRING "Height of the input image")
+set(CONV_IMG_COL 4096 CACHE STRING "Width of the input image")
 
 # General Parameters
 set(SCHEDULE "tensorcore" CACHE STRING "GPU schedule to use (cuda_only or tensorcore)")
