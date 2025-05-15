@@ -51,8 +51,8 @@ public:
             conv.compute_at(output, xi)
                 .update()
                 .tile(x, y, mmxi, mmyi, tile_x, tile_y)
-                .tile(r.x, r.y, rxi, ryi, tile_rx, tile_ry)
-                .reorder({ rxi, ryi, mmxi, mmyi, r.x, r.y, x, y})
+                .tile(rk.x, rk.y, rxi, ryi, tile_rx, tile_ry)
+                .reorder({ rxi, ryi, mmxi, mmyi, rk.x, rk.y, x, y})
                 .unroll(rxi)
                 .unroll(ryi)
                 ;
@@ -86,6 +86,7 @@ public:
             Var by("by"), ty("ty"), tyi("tyi");
             Var bx("bx"), tx("tx"), txi("txi");
             RVar rkxo("rkxo"), rkxi("rkxi");
+            RVar rkyo("rkyo"), rkyi("rkyi");
             
 
             /*------------------------------------------------------------------*
