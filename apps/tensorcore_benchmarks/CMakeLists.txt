@@ -44,7 +44,7 @@ target_compile_definitions(conv1d
     PRIVATE
     BENCHMARK_HEADER="conv1d_lib.h"
     BENCHMARK_NAME="conv1d"
-    CONV1D
+    RUN_conv1d
     KERNEL_SIZE=${CONV_KERNEL_SIZE}
     IMG_ROW=${CONV_IMG_ROW}
     IMG_COL=${CONV_IMG_COL}
@@ -55,7 +55,7 @@ target_compile_definitions(conv2d
     PRIVATE
     BENCHMARK_HEADER="conv2d_lib.h"
     BENCHMARK_NAME="conv2d"
-    CONV2D
+    RUN_conv2d
     KERNEL_SIZE=${CONV_KERNEL_SIZE}
     IMG_ROW=${CONV_IMG_ROW}
     IMG_COL=${CONV_IMG_COL}
