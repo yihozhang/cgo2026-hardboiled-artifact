@@ -69,7 +69,7 @@ target_link_libraries(conv1d
     Halide::Tools
 )
 
-target_link_libraries(conv1d
+target_link_libraries(conv2d
     PRIVATE
     conv2d_lib
     Halide::Tools
