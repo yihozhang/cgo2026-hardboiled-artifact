@@ -1051,7 +1051,9 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
 
-        body = insert_pending_definitions(body);
+        if (op->for_type == ForType::GPULane) {
+            body = insert_pending_definitions(body);
+        }
         avail_vars.erase(name);
         
         inside_gpu_kernel.pop();

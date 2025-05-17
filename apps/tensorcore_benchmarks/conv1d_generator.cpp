@@ -96,7 +96,7 @@ public:
             |  Tunables                       |
             *---------------------------------*/
             const int blockTileX = 256;
-            const int blockTileY = 1;
+            const int blockTileY = 16;
             const int threadTileX = 16;
             const int threadTileY = 1;
             const int reductionTileX = 8;
@@ -114,12 +114,12 @@ public:
                   .split(ty, ty, tyi, threadTileY)
                   .gpu_blocks(bx, by)
                   .reorder({txi, tyi, tx, ty, bx, by})
-                  .unroll(ty)
+                  //.unroll(ty)
                   .vectorize(txi)
                   .vectorize(tyi)
                   .vectorize(tx);
 
-            conv.compute_at(output, bx)
+            conv.compute_at(output, ty)
                 .store_in(MemoryType::WMMAAccumulator)
                 .split(y, ty, tyi, threadTileY)
                 .split(x, tx, txi, threadTileX)
@@ -133,7 +133,7 @@ public:
                 .split(x, tx, txi, threadTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 //.unroll(ty)
-                .reorder({rkxi, txi, tyi, tx, ty, rkxo})
+                .reorder({rkxi, txi, tyi, tx, rkxo, ty})
                 .atomic()
                 .vectorize(rkxi)
                 .vectorize(txi)
