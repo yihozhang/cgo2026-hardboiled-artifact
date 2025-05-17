@@ -232,7 +232,7 @@ Stmt EqSatIRParser::parse_stmt() {
     } else if (is_head("error")) {
         internal_error << "Error expression\n";
     } else {
-        internal_error << "Unknown expression at " << std::to_string(curr);
+        internal_error << "Unknown expression at " << std::to_string(curr) << "\nProgram: " + prog;
     }
     expect(')');
     return result;

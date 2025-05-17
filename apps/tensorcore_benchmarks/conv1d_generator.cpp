@@ -86,8 +86,61 @@ public:
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 .reorder({rkxi, txi, tyi, rkxo, tx, ty})
                 .unroll(rkxi)
+                .vectorize(txi)
+                .vectorize(tyi)
                 .atomic();
             
+        }
+        else if (true) {
+            /*---------------------------------*
+            |  Tunables                       |
+            *---------------------------------*/
+            const int blockTileX = 256;
+            const int blockTileY = 1;
+            const int threadTileX = 16;
+            const int threadTileY = 1;
+            const int reductionTileX = 8;
+
+            /*---------------------------------*
+            |  Vars / RVars                   |
+            *---------------------------------*/
+            Var by("by"), ty("ty"), tyi("tyi");
+            Var bx("bx"), tx("tx"), txi("txi");
+            RVar rkxo("rkxo"), rkxi("rkxi");
+
+            output.split(y, by, ty, blockTileY)
+                  .split(x, bx, tx, blockTileX)
+                  .split(tx, tx, txi, threadTileX)
+                  .split(ty, ty, tyi, threadTileY)
+                  .gpu_blocks(bx, by)
+                  .reorder({txi, tyi, tx, ty, bx, by})
+                  .unroll(ty)
+                  .vectorize(txi)
+                  .vectorize(tyi)
+                  .vectorize(tx);
+
+            conv.compute_at(output, bx)
+                .store_in(MemoryType::WMMAAccumulator)
+                .split(y, ty, tyi, threadTileY)
+                .split(x, tx, txi, threadTileX)
+                //.unroll(ty)
+                .vectorize(txi)
+                .vectorize(tyi)
+                .vectorize(tx);
+
+            conv.update()
+                .split(y, ty, tyi, threadTileY)
+                .split(x, tx, txi, threadTileX)
+                .split(rk.x, rkxo, rkxi, reductionTileX)
+                //.unroll(ty)
+                .reorder({rkxi, txi, tyi, tx, ty, rkxo})
+                .atomic()
+                .vectorize(rkxi)
+                .vectorize(txi)
+                .vectorize(tyi)
+                .vectorize(tx)
+                .unroll(rkxo)
+                ;
         }
         else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*

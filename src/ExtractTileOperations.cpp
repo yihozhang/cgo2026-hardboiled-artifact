@@ -1016,7 +1016,7 @@ struct SubstStores : public EqSatIRMutator {
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
                     Expr dist_expr = Call::make(
-                        call_stmt->type.with_lanes(lanes/32),
+                        call_stmt->type.with_lanes(lanes),
                         "DistributedConvolutionShuffle",
                         call_stmt->args,
                         call_stmt->call_type,
@@ -1025,7 +1025,7 @@ struct SubstStores : public EqSatIRMutator {
                         call_stmt->image,
                         call_stmt->param
                     );
-                    store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") * (lanes/32), 1, lanes/32), Parameter(), const_true(lanes/32), ModulusRemainder());
+                    store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
                     store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
                     body = Block::make(store_stmt, body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
@@ -1390,7 +1390,7 @@ protected:
             auto taps = kernel_taps.value() / tile_cnt.value();
             auto pixels = pixels_cnt.value();
             auto mat_cnt = tile_cnt.value();
-            auto ty = Float(16, pixels);
+            auto ty = Float(16, kernel_taps.value());
 
             /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so 
                it works for now */
@@ -1403,18 +1403,15 @@ protected:
             int wlanes_per_mat = 32 / mat_cnt;
 
             std::vector<Stmt> stores;
+            vector<int> indices;
+            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, kernel_taps.value() ), {}, {}, const_true(kernel_taps.value()), {});
+            Expr vec2 = FloatImm::make(Float(16), 0);
+
             for (int warp_lane=0; warp_lane<32; warp_lane++) {
                 int mat_id = warp_lane / wlanes_per_mat;
                 int row_base = (warp_lane % wlanes_per_mat) * rows_per_lane;
                 int row_max = row_base + rows_per_lane;
-
-                Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r + IntImm::make(Int(32), mat_id * taps), stride_r, taps), {}, {}, const_true(taps), {});
-                //Expr thread_id = Variable::make(Int(32), "conv_shuffle.thread_id_x");
-                //Expr koffset = (thread_id / wlanes_per_mat) * 8;
-                //Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r + koffset, stride_r, taps), {}, {}, const_true(taps), {});
-                Expr vec2 = FloatImm::make(Float(16), 0);
                 
-                vector<int> indices;
                 for (int j = row_base; j < row_max; j++) {
                     for (int i = 0; i < pixels; i++) {
                         if (0 <= j - i && j - i < taps) {
@@ -1425,21 +1422,25 @@ protected:
                     }
                 }
 
-                // Make the shuffle
-                auto v = Shuffle::make({vec1, vec2}, indices);
+                int new_indices = (row_max-row_base)*pixels;
 
-                // Make the store
-                Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
-
-                // conditional block
-                Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") == warp_lane, new_store);
-                
-                stores.push_back(cond);
-                //return new_store;
+                for (int i = warp_lane*new_indices; i < warp_lane*new_indices + new_indices; i++) {
+                    indices[i] = indices[i] + 8;
+                }
             }
-            
-            
-            return Block::make(stores);
+
+            // Make the shuffle
+            std::cout << "indices sz: " << indices.size() << std::endl;
+            std::cout << "vec1: " << vec1 << std::endl;
+            std::cout << "vec2: " << vec2 << std::endl;
+            auto v = Shuffle::make({vec1, vec2}, indices);
+
+            Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
+            // conditional block
+            Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
+
+
+            return cond;
         }
 
         return IRMutator::visit(store);
