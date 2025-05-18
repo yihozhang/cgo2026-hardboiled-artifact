@@ -248,7 +248,7 @@
                             (Load rhs-type rhs-name (Ramp (Ramp rhs-base (IntImm32 1) y-lanes) (Broadcast rhs-r-stride y-lanes) r-lanes))
                             (IntImm32 r-lanes)))))
             (IntImm32 0)
-            (IntImm32 (* y-lanes 2))
+            (IntImm32 (* y-lanes 4))
             )))
     (amx-float-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
