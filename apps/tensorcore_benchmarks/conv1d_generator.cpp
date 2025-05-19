@@ -91,14 +91,18 @@ public:
                 .atomic();
             
         }
-        else if (true) {
+        else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
             const int blockTileX = 256;
             const int blockTileY = 16;
-            const int threadTileX = 16;
-            const int threadTileY = 1;
+
+            // We compute 256 contiguous elements 
+            // as a 32x8 matrix
+            const int wmmaTileX = 256;
+            const int wmmaTileY = 1;
+
             const int reductionTileX = 8;
 
             /*---------------------------------*
@@ -106,41 +110,38 @@ public:
             *---------------------------------*/
             Var by("by"), ty("ty"), tyi("tyi");
             Var bx("bx"), tx("tx"), txi("txi");
+            Var mmy("mmy"), mmx("mmx");
+            Var mmyi("mmyi"), mmxi("mmxi");
             RVar rkxo("rkxo"), rkxi("rkxi");
 
-            output.split(y, by, ty, blockTileY)
-                  .split(x, bx, tx, blockTileX)
-                  .split(tx, tx, txi, threadTileX)
-                  .split(ty, ty, tyi, threadTileY)
+            output.split(y, by, mmy, blockTileY)
+                  .split(x, bx, mmx, blockTileX)
                   .gpu_blocks(bx, by)
-                  .reorder({txi, tyi, tx, ty, bx, by})
-                  //.unroll(ty)
-                  .vectorize(txi)
-                  .vectorize(tyi)
-                  .vectorize(tx);
+                  .split(mmy, mmy, mmyi, wmmaTileY)
+                  .split(mmx, mmx, mmxi, wmmaTileX)
 
-            conv.compute_at(output, ty)
+                  .reorder({mmxi, mmyi, mmx, mmy, bx, by})
+                  .vectorize(mmxi)
+                  .vectorize(mmyi);
+
+            conv.compute_at(output, mmx)
                 .store_in(MemoryType::WMMAAccumulator)
-                .split(y, ty, tyi, threadTileY)
-                .split(x, tx, txi, threadTileX)
-                //.unroll(ty)
-                .vectorize(txi)
-                .vectorize(tyi)
-                .vectorize(tx);
+                .split(y, mmy, mmyi, wmmaTileY)
+                .split(x, mmx, mmxi, wmmaTileX)
+                .reorder({mmxi, mmyi, mmx, mmy})
+                .vectorize(mmxi)
+                .vectorize(mmyi);
 
             conv.update()
-                .split(y, ty, tyi, threadTileY)
-                .split(x, tx, txi, threadTileX)
+                .split(y, mmy, mmyi, wmmaTileY)
+                .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
-                //.unroll(ty)
-                .reorder({rkxi, txi, tyi, tx, rkxo, ty})
+                .reorder({rkxi, mmxi, mmyi, rkxo, mmx, mmy})
                 .atomic()
+                .vectorize(mmxi)
+                .vectorize(mmyi)
                 .vectorize(rkxi)
-                .vectorize(txi)
-                .vectorize(tyi)
-                .vectorize(tx)
-                .unroll(rkxo)
-                ;
+                .unroll(rkxo);
         }
         else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*
