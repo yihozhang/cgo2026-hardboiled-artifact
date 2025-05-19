@@ -34,52 +34,17 @@ public:
     }
 
     void schedule() {
-        if (false) {
-            Var xi("xi"), yi("yi");
-            RVar rxi("rxi"), ryi("ryi");
-            Var mmxi("mmxi"),
-                mmyi("mmyi");
-            RVar mmri("mmri");
-            Var xy("xy"), xyi("xyi");
-
-            int tile_x = 4;
-            int tile_y = 4;
-            int tile_rx = 4;
-            int tile_ry = 4;
-
-            // update
-            conv.compute_at(output, xi)
-                .update()
-                .tile(x, y, mmxi, mmyi, tile_x, tile_y)
-                .tile(rk.x, rk.y, rxi, ryi, tile_rx, tile_ry)
-                .reorder({ rxi, ryi, mmxi, mmyi, rk.x, rk.y, x, y})
-                .unroll(rxi)
-                .unroll(ryi)
-                ;
-            conv
-                .tile(x, y, mmxi, mmyi, tile_x, tile_y)
-                .reorder(mmxi, mmyi, x, y)
-                .unroll(mmxi)
-                .unroll(mmyi);
-            output
-                .tile(x, y, mmxi, mmyi, tile_x, tile_y)
-                .gpu_tile(x, y, xi, yi, 16, 16)
-                .reorder({mmxi, mmyi, xi, yi, x, y})
-                .gpu_blocks(x, y)
-                .gpu_threads(xi, yi)
-                .unroll(mmxi)
-                .unroll(mmyi);
-        }
-        else if (gpu_schedule == Schedule::CUDA) {
+        if (gpu_schedule == Schedule::CUDA) {
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 32;
-            const int blockTileY = 32;
-            const int threadTileX = 2;
+            const int blockTileX = 16;
+            const int blockTileY = 16;
+            const int threadTileX = 4;
             const int threadTileY = 2;
             const int reductionTileX = 8;
             const int reductionTileY = 8;
+
             /*---------------------------------*
             |  Vars / RVars                   |
             *---------------------------------*/
@@ -93,10 +58,10 @@ public:
             |  1.  Scheduling the kernel that computes the output. Define GPU   |
             |      blocks and thread tiling.                                    |
             *------------------------------------------------------------------*/
-            output.split(y, by, ty, blockTileY)
-                  .split(x, bx, tx, blockTileX)
-                  .split(ty, ty, tyi, threadTileY)
-                  .split(tx, tx, txi, threadTileX)
+            output.split(y, ty, tyi, threadTileY)
+                  .split(x, tx, txi, threadTileX)
+                  .split(ty, by, ty, blockTileY)
+                  .split(tx, bx, tx, blockTileX)
                   .reorder({txi, tyi, tx, ty, bx, by})
                   .gpu_blocks(bx, by)
                   .gpu_threads(tx, ty)
@@ -110,10 +75,9 @@ public:
                 .split(y, ty, tyi, threadTileY)
                 .split(x, tx, txi, threadTileX)
                 .reorder(txi, tyi, tx, ty)
-                .atomic()
                 .vectorize(txi)
                 .vectorize(tyi);
-
+            
             /*------------------------------------------------------------------*
             |  3.  Schedule the reduction of conv                              |
             *------------------------------------------------------------------*/
@@ -125,21 +89,33 @@ public:
                 .reorder({rkxi, rkyi, txi, tyi, rkxo, rkyo, tx, ty})
                 .unroll(rkxi)
                 .unroll(rkyi)
+                .vectorize(txi)
+                .vectorize(tyi)
                 .atomic();
-            
         }
         else if (gpu_schedule == Schedule::TensorCore) {
+            /*---------------------------------*
+            |  Tunables                       |
+            *---------------------------------*/
+            const int blockTileX = 8;
+            const int blockTileY = 32;
+            const int threadTileX = 8;
+            const int threadTileY = 32;
+            const int reductionTileX = 8;
+            const int reductionTileY = 1;
+
             /*---------------------------------*
             |  Vars / RVars                   |
             *---------------------------------*/
             Var by("by"), ty("ty"), tyi("tyi");
             Var bx("bx"), tx("tx"), txi("txi");
             RVar rkxo("rkxo"), rkxi("rkxi");
-
-            output.split(x, bx, tx, 8)
-                  .split(y, by, ty, 64)
-                  .split(tx, tx, txi, 8)
-                  .split(ty, ty, tyi, 32)
+            RVar rkyo("rkyo"), rkyi("rkyi");
+            
+            output.split(x, bx, tx, blockTileX)
+                  .split(y, by, ty, blockTileY)
+                  .split(tx, tx, txi, threadTileX)
+                  .split(ty, ty, tyi, threadTileY)
                   .gpu_blocks(bx, by)
                   .reorder({txi, tyi, tx, ty, bx, by})
                   .unroll(tx)
@@ -149,31 +125,25 @@ public:
 
             conv.compute_at(output, bx)
                 .store_in(MemoryType::WMMAAccumulator)
-                .split(x, tx, txi, 8)
-                .split(y, ty, tyi, 64)
-                .atomic()
+                .split(x, tx, txi, threadTileX)
+                .split(y, ty, tyi, threadTileY)
                 .vectorize(txi)
-                .vectorize(tyi);
+                .vectorize(tyi)
+                //.unroll(ty)
+                ;
 
             conv.update()
-                .split(x, tx, txi, 8)
-                .split(y, ty, tyi, 32)
-                .split(rk.x, rkxo, rkxi, 8)
-                // I cannot unroll rro, since the temporary buffer refers to
-                // rro but is lifted to the host, where rro is not available.
-                // .unroll(rkxo)
-                .unroll(ty)
-                .reorder({rkxi, txi, tyi, tx, ty, rkxo})                
+                .split(x, tx, txi, threadTileX)
+                .split(y, ty, tyi, threadTileY)
+                .split(rk.x, rkxo, rkxi, reductionTileX)
+                .split(rk.y, rkyo, rkyi, reductionTileY)
+                .reorder({rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})            
                 .atomic()
                 .vectorize(rkxi)
                 .vectorize(txi)
-                .vectorize(tyi);
-
-            image.in()
-                 .compute_at(conv, tx)
-                 .store_in(MemoryType::WMMAA)
-                 .vectorize(_0)
-                 .vectorize(_1);
+                .vectorize(tyi)
+                .unroll(rkyi)
+                .unroll(rkxo);
         }
     }
 

@@ -1051,9 +1051,9 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
 
-        if (op->for_type == ForType::GPULane) {
+        //if (op->for_type == ForType::GPULane) {
             body = insert_pending_definitions(body);
-        }
+        //}
         avail_vars.erase(name);
         
         inside_gpu_kernel.pop();
@@ -1438,9 +1438,7 @@ protected:
             auto v = Shuffle::make({vec1, vec2}, indices);
 
             Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
-            // conditional block
             Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
-
 
             return cond;
         }
