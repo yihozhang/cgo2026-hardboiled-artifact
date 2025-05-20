@@ -34,9 +34,7 @@ int main(int argc, char **argv) {
     std::cout << "Running " << benchmark_name << " with:" << std::endl;            
     std::cout << "  Kernel size: " << kSize << std::endl;             
     std::cout << "  Image size: " << imgW << "x" << imgH << std::endl;
-    std::cout << "  Schedule: " << SCHEDULE << std::endl;             
-                                                                      
-    
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;                                                                           
 
     // Create image buffer with random values
     Buffer<uint16_t> image(imgW, imgH);
@@ -48,8 +46,6 @@ int main(int argc, char **argv) {
 
     // Create output buffer
     Buffer<float> output(imgW - kSize, imgH);
-
-    
 
 #if defined(RUN_conv1d)
     // Create kernel buffer                                           
@@ -115,6 +111,34 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "Runtime: " << time << "\n";
+
+    // Verify results
+    if (VERIFY_OUTPUT) {
+        bool success = true;
+        for (int y = 0; y < imgH - kSize; y++) {
+            for (int x = 0; x < imgW - kSize; x++) {
+                float expected = 0.0f;
+                for (int ky = 0; ky < kSize; ky++) {
+                    for (int kx = 0; kx < kSize; kx++) {
+                        expected += bfloat16_to_float(kernel(kx, ky)) * bfloat16_to_float(image(x + kx, y + ky));
+                    }
+                }
+                if (fabs(expected - output(x, y)) > 0.001f) {
+                    std::cerr << "Error at (" << x << ", " << y << "): "
+                              << output(x, y) << " != " << expected << "\n";
+                    success = false;
+                }
+            }
+        }
+
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
 #else
     #error "Unknown benchmark type"
 #endif
