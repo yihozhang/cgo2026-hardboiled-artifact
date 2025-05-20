@@ -36,11 +36,7 @@ int main(int argc, char **argv) {
     std::cout << "  Image size: " << imgW << "x" << imgH << std::endl;
     std::cout << "  Schedule: " << SCHEDULE << std::endl;             
                                                                       
-    // Create kernel buffer                                           
-    Buffer<uint16_t> kernel(kSize);                                   
-    for (int i = 0; i < kSize; i++) {
-        kernel(i) = uint16_t(i);
-    }
+    
 
     // Create image buffer with random values
     Buffer<uint16_t> image(imgW, imgH);
@@ -57,9 +53,21 @@ int main(int argc, char **argv) {
     auto time = benchmark(5, 5, [&]() {
 
 #if defined(RUN_conv1d)
-        conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+    // Create kernel buffer                                           
+    Buffer<uint16_t> kernel(kSize);                                   
+    for (int i = 0; i < kSize; i++) {
+        kernel(i) = uint16_t(i);
+    }
+    conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
 #elif defined(RUN_conv2d)
-        conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+    // Create kernel buffer                                           
+    Buffer<uint16_t> kernel(kSize, kSize);                                   
+    for (int i = 0; i < kSize; i++) {
+        for (int j = 0; j < kSize; j++) {
+            kernel(i, j) = uint16_t(i * kSize + j);
+        }
+    }
+    conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
 #else
     #error "Unknown benchmark type"
 #endif
