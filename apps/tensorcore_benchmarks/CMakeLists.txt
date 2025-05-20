@@ -29,12 +29,12 @@ add_halide_generator(conv2d.generator SOURCES conv2d_generator.cpp)
 
 # Create compiled libraries (adding extra targets for cross-compilation)
 add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_86)
-add_conv_library(conv1d_lib_win conv1d x86-64-windows-cuda-cuda_capability_86-no_asserts-no_bounds_query)
-add_conv_library(conv1d_lib_linux conv1d x86-64-linux-cuda-cuda_capability_86-no_asserts-no_bounds_query)
+add_conv_library(conv1d_lib_win conv1d x86-64-windows-cuda-cuda_capability_86)
+add_conv_library(conv1d_lib_linux conv1d x86-64-linux-cuda-cuda_capability_86)
 
 add_conv_library(conv2d_lib conv2d host-cuda-cuda_capability_86)
-add_conv_library(conv2d_lib_win conv2d x86-64-windows-cuda-cuda_capability_86-no_asserts-no_bounds_query)
-add_conv_library(conv2d_lib_linux conv2d x86-64-linux-cuda-cuda_capability_86-no_asserts-no_bounds_query)
+add_conv_library(conv2d_lib_win conv2d x86-64-windows-cuda-cuda_capability_86)
+add_conv_library(conv2d_lib_linux conv2d x86-64-linux-cuda-cuda_capability_86)
 
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
