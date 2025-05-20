@@ -49,8 +49,7 @@ int main(int argc, char **argv) {
     // Create output buffer
     Buffer<float> output(imgW - kSize, imgH);
 
-    // Call the generated function
-    auto time = benchmark(5, 5, [&]() {
+    
 
 #if defined(RUN_conv1d)
     // Create kernel buffer                                           
@@ -58,20 +57,10 @@ int main(int argc, char **argv) {
     for (int i = 0; i < kSize; i++) {
         kernel(i) = uint16_t(i);
     }
-    conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
-#elif defined(RUN_conv2d)
-    // Create kernel buffer                                           
-    Buffer<uint16_t> kernel(kSize, kSize);                                   
-    for (int i = 0; i < kSize; i++) {
-        for (int j = 0; j < kSize; j++) {
-            kernel(i, j) = uint16_t(i * kSize + j);
-        }
-    }
-    conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
-#else
-    #error "Unknown benchmark type"
-#endif
-
+    
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {
+        conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
         output.device_sync();
     });
     
@@ -106,6 +95,29 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#elif defined(RUN_conv2d)
+    // Create kernel buffer                                           
+    Buffer<uint16_t> kernel(kSize, kSize);                                   
+    for (int i = 0; i < kSize; i++) {
+        for (int j = 0; j < kSize; j++) {
+            kernel(i, j) = uint16_t(i * kSize + j);
+        }
+    }
+    
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {   
+        conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+        output.device_sync();
+    });
+    
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    std::cout << "Runtime: " << time << "\n";
+#else
+    #error "Unknown benchmark type"
+#endif
 
     return 0;
 }
