@@ -108,10 +108,8 @@ public:
             /*---------------------------------*
             |  Vars / RVars                   |
             *---------------------------------*/
-            Var by("by"), ty("ty"), tyi("tyi");
-            Var bx("bx"), tx("tx"), txi("txi");
-            Var mmy("mmy"), mmx("mmx");
-            Var mmyi("mmyi"), mmxi("mmxi");
+            Var by("by"), mmy("mmy"), mmyi("mmyi");
+            Var bx("bx"), mmx("mmx"), mmxi("mmxi");
             RVar rkxo("rkxo"), rkxi("rkxi");
 
             output.split(y, by, mmy, blockTileY)

@@ -25,7 +25,7 @@ public:
     Output<Buffer<float>> output{"output", 2};
 
     void generate() {
-        rk = RDom(0, kSize, 0, kSize, "rk");
+        rk = RDom(0, 32, 0, 32, "rk");
 
         conv(x, y) = cast<float>(0);
         conv(x, y) += cast<float>(kernel(rk.x, rk.y)) * cast<float>(image(x + rk.x, y + rk.y));
@@ -99,46 +99,49 @@ public:
             *---------------------------------*/
             const int blockTileX = 256;
             const int blockTileY = 1;
-            const int threadTileX = 256;
-            const int threadTileY = 1;
+
+            // We compute 256 contiguous elements 
+            // as a 32x8 matrix
+            const int wmmaTileX = 256;
+            const int wmmaTileY = 1;
+
             const int reductionTileX = 8;
             const int reductionTileY = 1;
 
             /*---------------------------------*
             |  Vars / RVars                   |
             *---------------------------------*/
-            Var by("by"), ty("ty"), tyi("tyi");
-            Var bx("bx"), tx("tx"), txi("txi");
+            Var by("by"), mmy("mmy"), mmyi("mmyi");
+            Var bx("bx"), mmx("mmx"), mmxi("mmxi");
             RVar rkxo("rkxo"), rkxi("rkxi");
             RVar rkyo("rkyo"), rkyi("rkyi");
             
-            output.split(x, bx, tx, blockTileX)
-                  .split(y, by, ty, blockTileY)
-                  .split(tx, tx, txi, threadTileX)
-                  .split(ty, ty, tyi, threadTileY)
+            output.split(y, by, mmy, blockTileY)
+                  .split(x, bx, mmx, blockTileX)
                   .gpu_blocks(bx, by)
-                  .reorder({txi, tyi, tx, ty, bx, by})
-                  .unroll(tx)
-                  .vectorize(txi)
-                  .vectorize(tyi);
+                  .split(mmy, mmy, mmyi, wmmaTileY)
+                  .split(mmx, mmx, mmxi, wmmaTileX)
+                  .reorder({mmxi, mmyi, mmx, mmy, bx, by})
+                  .vectorize(mmxi)
+                  .vectorize(mmyi);
 
-            conv.compute_at(output, ty)
+            conv.compute_at(output, mmx)
                 .store_in(MemoryType::WMMAAccumulator)
-                .split(x, tx, txi, threadTileX)
-                .split(y, ty, tyi, threadTileY)
-                .vectorize(txi)
-                .vectorize(tyi);
+                .split(y, mmy, mmyi, wmmaTileY)
+                .split(x, mmx, mmxi, wmmaTileX)
+                .vectorize(mmxi)
+                .vectorize(mmyi);
 
             conv.update()
-                .split(x, tx, txi, threadTileX)
-                .split(y, ty, tyi, threadTileY)
+                .split(y, mmy, mmyi, wmmaTileY)
+                .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
-                .reorder({rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})            
+                .reorder({rkxi, mmxi, mmyi, rkyi, rkxo, rkyo, mmx, mmy})            
                 .atomic()
+                .vectorize(mmxi)
+                .vectorize(mmyi)
                 .vectorize(rkxi)
-                .vectorize(txi)
-                .vectorize(tyi)
                 .unroll(rkyi)
                 .unroll(rkxo)
                 .unroll(rkyo);
