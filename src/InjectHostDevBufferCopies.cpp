@@ -81,6 +81,12 @@ class FindBufferUsage : public IRVisitor {
                 devices_touched.insert(current_device_api);
                 devices_writing.insert(current_device_api);
             }
+        } else if (starts_with(op->name, "wmma.load")) {
+            internal_assert(op->args.size() == 3);
+            const Variable *var = op->args[0].as<Variable>();
+            if (var && (var->name == buffer)) {
+                devices_touched.insert(current_device_api);
+            }
         } else if (op->is_extern() && op->func.defined()) {
             // This is a call to an extern stage
             Function f(op->func);

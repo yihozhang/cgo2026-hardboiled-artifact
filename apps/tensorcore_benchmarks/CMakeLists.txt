@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
 
 # Conv parameters
-set(CONV_KERNEL_SIZE 128 CACHE STRING "Size of the convolution kernel")
+set(CONV_KERNEL_SIZE 16 CACHE STRING "Size of the convolution kernel")
 set(CONV_IMG_ROW 4096 CACHE STRING "Height of the input image")
 set(CONV_IMG_COL 4096 CACHE STRING "Width of the input image")
 

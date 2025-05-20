@@ -13,7 +13,7 @@ public:
         {"tensorcore", Schedule::TensorCore}
     }};
 
-    GeneratorParam<int> kSize{"kSize", 128};
+    GeneratorParam<int> kSize{"kSize", 16};
     GeneratorParam<int> imgRow{"imgRow", 4096};
     GeneratorParam<int> imgCol{"imgCol", 4096};
 
@@ -40,7 +40,7 @@ public:
             *---------------------------------*/
             const int blockTileX = 16;
             const int blockTileY = 16;
-            const int threadTileX = 4;
+            const int threadTileX = 8;
             const int threadTileY = 2;
             const int reductionTileX = 8;
             const int reductionTileY = 8;
@@ -86,7 +86,7 @@ public:
                 .split(x, tx, txi, threadTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
-                .reorder({rkxi, rkyi, txi, tyi, rkxo, rkyo, tx, ty})
+                .reorder({rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})
                 .unroll(rkxi)
                 .unroll(rkyi)
                 .vectorize(txi)
@@ -97,10 +97,10 @@ public:
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 8;
-            const int blockTileY = 32;
-            const int threadTileX = 8;
-            const int threadTileY = 32;
+            const int blockTileX = 256;
+            const int blockTileY = 1;
+            const int threadTileX = 256;
+            const int threadTileY = 1;
             const int reductionTileX = 8;
             const int reductionTileY = 1;
 
@@ -119,18 +119,15 @@ public:
                   .gpu_blocks(bx, by)
                   .reorder({txi, tyi, tx, ty, bx, by})
                   .unroll(tx)
-                  .unroll(ty)
                   .vectorize(txi)
                   .vectorize(tyi);
 
-            conv.compute_at(output, bx)
+            conv.compute_at(output, ty)
                 .store_in(MemoryType::WMMAAccumulator)
                 .split(x, tx, txi, threadTileX)
                 .split(y, ty, tyi, threadTileY)
                 .vectorize(txi)
-                .vectorize(tyi)
-                //.unroll(ty)
-                ;
+                .vectorize(tyi);
 
             conv.update()
                 .split(x, tx, txi, threadTileX)
@@ -143,7 +140,8 @@ public:
                 .vectorize(txi)
                 .vectorize(tyi)
                 .unroll(rkyi)
-                .unroll(rkxo);
+                .unroll(rkxo)
+                .unroll(rkyo);
         }
     }
 

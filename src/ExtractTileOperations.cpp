@@ -860,7 +860,7 @@ protected:
             Expr predicate = EqSatIRMutator::mutate(load->predicate);
             Expr index = EqSatIRMutator::mutate(load->index);
 
-            std::string name = prefix + ".temporary." + std::to_string(store_no++);
+            std::string name = prefix + std::to_string(store_no++);
             prologues.emplace_back(name, mutate(v->expr));
             return Load::make(load->type, name, index, load->image, load->param, predicate, load->alignment);
         } else {
@@ -873,7 +873,7 @@ protected:
         if (const StringVar *v = var->name->to_string_var()) {
             return Variable::make(var->type, v->name);
         } else if (const ExprVar *v = var->name->to_expr_var()) {
-            auto name = prefix + ".temporary." + std::to_string(store_no++);
+            auto name = prefix + std::to_string(store_no++);
             prologues.emplace_back(name, mutate(v->expr));
             return Variable::make(var->type, name);
         } else {
@@ -1002,7 +1002,7 @@ struct SubstStores : public EqSatIRMutator {
         while (it != pending_definitions.end()) {
             auto &prologue = *it;
             // Find the first place where not every variable is available (or we are at the root of the GPU kernel)
-            if (std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
+            if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
                 const int lanes = prologue.type().lanes();
                 Stmt store_stmt;
 
@@ -1026,8 +1026,18 @@ struct SubstStores : public EqSatIRMutator {
                         call_stmt->param
                     );
                     store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
-                    store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
+                    //store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
+                    
                     body = Block::make(store_stmt, body);
+
+                    BufferBuilder builder;
+                    builder.host = Variable::make(Handle(), prologue.name);
+                    builder.type = prologue.type().with_lanes(1);
+                    builder.dimensions = 1;
+                    builder.mins.push_back(0);
+                    builder.extents.push_back(lanes);
+                    builder.strides.push_back(1);
+                    body = LetStmt::make(prologue.name + ".buffer", builder.build(), body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 } else {
                     store_stmt = Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
@@ -1376,7 +1386,6 @@ protected:
     Stmt visit(const Store *store) override {
         const Call *rhs = store->value.as<Call>();
         if (rhs && rhs->name == "DistributedConvolutionShuffle") {
-            std::cout << "DistributedConvolutionShuffle: " << store->value << std::endl;
             const std::vector<Expr> &args = store->value.as<Call>()->args;
             internal_assert(args.size() == 6);
             const auto *var = args[0].as<Variable>();
@@ -1427,20 +1436,18 @@ protected:
                 int new_indices = (row_max-row_base)*pixels;
 
                 for (int i = warp_lane*new_indices; i < warp_lane*new_indices + new_indices; i++) {
-                    indices[i] = indices[i] + 8;
+                    indices[i] = indices[i] + (8 * mat_id);
                 }
             }
 
             // Make the shuffle
-            std::cout << "indices sz: " << indices.size() << std::endl;
-            std::cout << "vec1: " << vec1 << std::endl;
-            std::cout << "vec2: " << vec2 << std::endl;
             auto v = Shuffle::make({vec1, vec2}, indices);
 
             Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
-            Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
+            
+            //Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
 
-            return cond;
+            return new_store;
         }
 
         return IRMutator::visit(store);

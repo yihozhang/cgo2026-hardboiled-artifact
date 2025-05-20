@@ -119,7 +119,6 @@ public:
                   .gpu_blocks(bx, by)
                   .split(mmy, mmy, mmyi, wmmaTileY)
                   .split(mmx, mmx, mmxi, wmmaTileX)
-
                   .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                   .vectorize(mmxi)
                   .vectorize(mmyi);
