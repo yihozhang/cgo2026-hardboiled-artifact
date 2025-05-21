@@ -138,7 +138,8 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
-                .unroll(rkxo);
+                //.unroll(rkxo)
+                ;
         }
     }
 

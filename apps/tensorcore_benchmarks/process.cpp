@@ -89,9 +89,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Create output buffer
-    Buffer<float> output(imgW - kSize, imgH - kSize);
-
 #if defined(RUN_conv1d)
     // Create kernel buffer                                           
     Buffer<uint16_t> kernel(kSize);                                   
@@ -101,6 +98,9 @@ int main(int argc, char **argv) {
 
     image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
     kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+    // Create output buffer
+    Buffer<float> output(imgW - kSize, imgH);
     
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
@@ -112,20 +112,28 @@ int main(int argc, char **argv) {
         output.copy_to_host();
     }
 
+    output.device_sync();
+
     std::cout << "Runtime: " << time << "\n";
 
     // Verify results
     if (VERIFY_OUTPUT) {
         bool success = true;
         for (int y = 0; y < imgH; y++) {
+            if (!success) {
+                break;
+            }
             for (int x = 0; x < imgW - kSize; x++) {
+                if (!success) {
+                    break;
+                }
                 float expected = 0.0f;
                 for (int k = 0; k < kSize; k++) {
                     expected += halide_float16_bits_to_float(kernel(k)) * halide_float16_bits_to_float(image(x + k, y));
                 }
-                if (fabs(expected - output(x, y)) > 0.1f) {
-                    std::cerr << "Error at (" << x << ", " << y << "): "
-                              << output(x, y) << " != " << expected << "\n";
+                if (fabs(expected - output(x, y)) > 0.001f) {
+                    std::cerr << "Error at (" << y << ", " << x << "): "
+                              << output(y, x) << " != " << expected << "\n";
                     success = false;
                 }
             }
@@ -150,6 +158,9 @@ int main(int argc, char **argv) {
     
     image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
     kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+    // Create output buffer
+    Buffer<float> output(imgW - kSize, imgH - kSize);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {   
@@ -181,20 +192,6 @@ int main(int argc, char **argv) {
                     success = false;
                     break;
                 }
-            }
-        }
-
-        for (int y = 0; y < 16; y++) {
-            for (int x = 0; x < 1; x++) {
-                float expected = 0.0f;
-                for (int ky = 0; ky < kSize; ky++) {
-                    for (int kx = 0; kx < kSize; kx++) {
-                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
-                    }
-                }
-                std::cout << "(" << x << ", " << y << ") " 
-                         << std::fixed << std::setprecision(10) 
-                         << output(x, y) << " " << expected << "\n";
             }
         }
 
