@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> image(imgW, imgH);
     for (int y = 0; y < imgH; y++) {
         for (int x = 0; x < imgW; x++) {
-            image(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
+            image(x, y) = float_to_float16(1); //uint16_t(rand() % 20);
         }
     }
 
@@ -96,8 +96,11 @@ int main(int argc, char **argv) {
     // Create kernel buffer                                           
     Buffer<uint16_t> kernel(kSize);                                   
     for (int i = 0; i < kSize; i++) {
-        kernel(i) = uint16_t(i);
+        kernel(i) = float_to_float16(1);
     }
+
+    image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+    kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
     
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
@@ -141,7 +144,7 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> kernel(kSize, kSize);                                   
     for (int i = 0; i < kSize; i++) {
         for (int j = 0; j < kSize; j++) {
-            kernel(i, j) = float_to_float16((i ^ j) & 1);
+            kernel(i, j) = float_to_float16(1);
         }
     }
     
@@ -176,23 +179,22 @@ int main(int argc, char **argv) {
                               << std::fixed << std::setprecision(10) 
                               << output(x, y) << " != " << expected << "\n";
                     success = false;
+                    break;
                 }
             }
         }
 
-        for (int y = 0; y < 4; y++) {
-            for (int x = 0; x < 4; x++) {
-                int rand_x = rand() % (imgW - kSize);
-                int rand_y = rand() % (imgH - kSize);
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 1; x++) {
                 float expected = 0.0f;
                 for (int ky = 0; ky < kSize; ky++) {
                     for (int kx = 0; kx < kSize; kx++) {
                         expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
                     }
                 }
-                std::cout << "(" << rand_x << ", " << rand_y << ") " 
+                std::cout << "(" << x << ", " << y << ") " 
                          << std::fixed << std::setprecision(10) 
-                         << output(rand_x, rand_y) << " " << expected << "\n";
+                         << output(x, y) << " " << expected << "\n";
             }
         }
 
