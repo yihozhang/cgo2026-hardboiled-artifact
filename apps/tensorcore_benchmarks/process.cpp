@@ -69,6 +69,8 @@ uint16_t float_to_float16(float value) {
 }
 
 int main(int argc, char **argv) {                                     
+    
+#if defined(RUN_conv1d)
     // Create test data using compile-time definitions                
     const int kSize = KERNEL_SIZE;                                    
     const int imgW = IMG_COL;                                         
@@ -89,7 +91,6 @@ int main(int argc, char **argv) {
         }
     }
 
-#if defined(RUN_conv1d)
     // Create kernel buffer                                           
     Buffer<uint16_t> kernel(kSize);                                   
     for (int i = 0; i < kSize; i++) {
@@ -132,8 +133,8 @@ int main(int argc, char **argv) {
                     expected += halide_float16_bits_to_float(kernel(k)) * halide_float16_bits_to_float(image(x + k, y));
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {
-                    std::cerr << "Error at (" << y << ", " << x << "): "
-                              << output(y, x) << " != " << expected << "\n";
+                    std::cerr << "Error at (" << x << ", " << y << "): "
+                              << output(x, y) << " != " << expected << "\n";
                     success = false;
                 }
             }
@@ -148,11 +149,31 @@ int main(int argc, char **argv) {
         }
     }
 #elif defined(RUN_conv2d)
+    // Create test data using compile-time definitions                
+    const int kSize = KERNEL_SIZE;                                    
+    const int imgW = IMG_COL;                                         
+    const int imgH = IMG_ROW;                                         
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;            
+    std::cout << "  Kernel size: " << kSize << std::endl;             
+    std::cout << "  Image size: " << imgW << "x" << imgH << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;                                                                           
+
+    // Create image buffer with random values
+    Buffer<uint16_t> image(imgW, imgH);
+    for (int y = 0; y < imgH; y++) {
+        for (int x = 0; x < imgW; x++) {
+            image(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
+        }
+    }
+
     // Create kernel buffer                                           
     Buffer<uint16_t> kernel(kSize, kSize);                                   
     for (int i = 0; i < kSize; i++) {
         for (int j = 0; j < kSize; j++) {
-            kernel(i, j) = float_to_float16(1);
+            kernel(i, j) = float_to_float16((i ^ j) & 1);
         }
     }
     
@@ -192,6 +213,85 @@ int main(int argc, char **argv) {
                     for (int kx = 0; kx < kSize; kx++) {
                         expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
                     }
+                }
+                if (fabs(expected - output(x, y)) > 0.001f) {
+                    std::cerr << "Error at (" << x << ", " << y << "): "
+                              << std::fixed << std::setprecision(10) 
+                              << output(x, y) << " != " << expected << "\n";
+                    success = false;
+                }
+            }
+        }
+
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
+#elif defined(RUN_matmul)
+    // Create test data using compile-time definitions                
+    const int M = MATMUL_M;                                    
+    const int N = MATMUL_N;                                         
+    const int K = MATMUL_K;
+    
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;            
+    std::cout << "  Matrix size: " << M << "x" << N << "x" << K << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;                                                                           
+
+    // Create matrix buffers with random values
+    Buffer<uint16_t> matA(M, K);
+    for (int y = 0; y < M; y++) {
+        for (int x = 0; x < K; x++) {
+            matA(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
+        }
+    }
+
+    Buffer<uint16_t> matB(K, N);
+    for (int y = 0; y < K; y++) {
+        for (int x = 0; x < N; x++) {
+            matB(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
+        }
+    }
+
+    matA.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+    matB.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+    // Create output buffer
+    Buffer<float> output(M, N);             
+
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {   
+        matmul(matA.raw_buffer(), matB.raw_buffer(), output.raw_buffer());
+        output.device_sync();
+    });
+
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    output.device_sync();
+
+    std::cout << "Runtime: " << time << "\n";
+
+    // Verify results
+    if (VERIFY_OUTPUT) {
+        bool success = true;
+        for (int y = 0; y < 256; y++) {
+            if (!success) {
+                break;
+            }
+            for (int x = 0; x < 256; x++) {
+                if (!success) {
+                    break;
+                }
+                float expected = 0.0f;
+                for (int k = 0; k < K; k++) {
+                    expected += halide_float16_bits_to_float(matA(k, y)) * halide_float16_bits_to_float(matB(x, k));
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
