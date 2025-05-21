@@ -231,7 +231,7 @@
 
         (= m-lanes (/ tot-lanes 32))
         (= n-lanes (/ tot-lanes 8))
-        (= n-stride (/ tot-lanes 8))
+        (= n-stride (/ tot-lanes 32))
 
         (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
     ) (
