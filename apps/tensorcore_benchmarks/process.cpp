@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> image(imgW, imgH);
     for (int y = 0; y < imgH; y++) {
         for (int x = 0; x < imgW; x++) {
-            image(x, y) = float_to_float16(1); //uint16_t(rand() % 20);
+            image(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
         }
     }
 
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     // Create kernel buffer                                           
     Buffer<uint16_t> kernel(kSize);                                   
     for (int i = 0; i < kSize; i++) {
-        kernel(i) = float_to_float16(1);
+        kernel(i) = float_to_float16(i & 1);
     }
 
     image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
@@ -172,13 +172,21 @@ int main(int argc, char **argv) {
         output.copy_to_host();
     }
 
+    output.device_sync();
+
     std::cout << "Runtime: " << time << "\n";
 
     // Verify results
     if (VERIFY_OUTPUT) {
         bool success = true;
         for (int y = 0; y < imgH - kSize; y++) {
+            if(!success) {
+                break;
+            }
             for (int x = 0; x < imgW - kSize; x++) {
+                if(!success) {
+                    break;
+                }
                 float expected = 0.0f;
                 for (int ky = 0; ky < kSize; ky++) {
                     for (int kx = 0; kx < kSize; kx++) {
@@ -190,7 +198,6 @@ int main(int argc, char **argv) {
                               << std::fixed << std::setprecision(10) 
                               << output(x, y) << " != " << expected << "\n";
                     success = false;
-                    break;
                 }
             }
         }
