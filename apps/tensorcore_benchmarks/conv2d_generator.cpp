@@ -144,8 +144,7 @@ public:
                 .vectorize(rkxi)
                 .unroll(rkyi)
                 .unroll(rkxo)
-                //.unroll(rkyo)
-                ;
+                .unroll(rkyo);
         }
     }
 
