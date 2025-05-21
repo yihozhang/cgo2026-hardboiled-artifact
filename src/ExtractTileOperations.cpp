@@ -1404,6 +1404,8 @@ protected:
             auto mat_cnt = tile_cnt.value();
             auto ty = Float(16, kernel_taps.value());
 
+            std::cout << "DistributedConvolutionShuffle: " << store->name << " " << store->index << " " << store->value << std::endl;
+
             /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so 
                it works for now */
             int out_matrix_rows = (pixels + taps);
@@ -1429,7 +1431,7 @@ protected:
                         if (0 <= j - i && j - i < taps) {
                             indices.push_back(j - i);
                         } else {
-                            indices.push_back(taps);
+                            indices.push_back(kernel_taps.value());
                         }
                     }
                 }
@@ -1437,7 +1439,7 @@ protected:
                 int new_indices = (row_max-row_base)*pixels;
 
                 for (int i = warp_lane*new_indices; i < warp_lane*new_indices + new_indices; i++) {
-                    indices[i] = indices[i] + (8 * mat_id);
+                    indices[i] = std::min(static_cast<int>(kernel_taps.value()), static_cast<int>(indices[i] + (8 * mat_id)));
                 }
             }
 
