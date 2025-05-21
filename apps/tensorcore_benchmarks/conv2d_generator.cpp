@@ -25,7 +25,7 @@ public:
     Output<Buffer<float>> output{"output", 2};
 
     void generate() {
-        rk = RDom(0, 32, 0, 32, "rk");
+        rk = RDom(0, kSize, 0, kSize, "rk");
 
         conv(x, y) = cast<float>(0);
         conv(x, y) += cast<float>(kernel(rk.x, rk.y)) * cast<float>(image(x + rk.x, y + rk.y));
@@ -144,7 +144,8 @@ public:
                 .vectorize(rkxi)
                 .unroll(rkyi)
                 .unroll(rkxo)
-                .unroll(rkyo);
+                //.unroll(rkyo)
+                ;
         }
     }
 

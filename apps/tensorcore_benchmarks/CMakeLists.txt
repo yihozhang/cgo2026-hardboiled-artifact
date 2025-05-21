@@ -4,14 +4,14 @@ project(tensorcore_benchmarks)
 enable_testing()
 
 # Set up language settings
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
 
 # Conv parameters
 set(CONV_KERNEL_SIZE 16 CACHE STRING "Size of the convolution kernel")
-set(CONV_IMG_ROW 4096 CACHE STRING "Height of the input image")
-set(CONV_IMG_COL 4096 CACHE STRING "Width of the input image")
+set(CONV_IMG_ROW 3840 CACHE STRING "Height of the input image")
+set(CONV_IMG_COL 2160 CACHE STRING "Width of the input image")
 
 # General Parameters
 set(SCHEDULE "tensorcore" CACHE STRING "GPU schedule to use (cuda_only or tensorcore)")

@@ -5,6 +5,7 @@
                                                                       
 #include <iostream>                                                   
 #include <cstdlib>  // for rand()                                     
+#include <iomanip>  // for std::fixed and std::setprecision
                                                                       
 #ifndef BENCHMARK_HEADER                                                 
 #error "BENCHMARK_HEADER must be defined"                                
@@ -21,6 +22,50 @@ float bfloat16_to_float(uint16_t b) {
     float ret;
     memcpy(&ret, bits, sizeof(float));
     return ret;
+}
+
+// Stole this from Halide's float16.h since I didn't find it in runtime
+uint16_t float_to_float16(float value) {
+    // Start by copying over the sign bit
+    uint16_t bits = std::signbit(value) << 15;
+
+    // Check for special values
+    if (value == 0) {
+        return bits;
+    } else if (std::isnan(value)) {
+        return bits | 0x7c00 | 0x03ff;
+    } else if (std::isinf(value)) {
+        return bits | 0x7c00;
+    }
+
+    int exp;
+    // Get exponent, with bias already subtracted.
+    std::frexp(value, &exp);
+    if (exp > 16) {
+        // Too large, return infinity. Per initialization, bits only
+        // contains the sign bit, so this is +/-inf.
+        return bits | 0x7c00;
+    } else if (exp < -13) {
+        // Too small, clamp to 2^-24
+        value = std::ldexp(value, 24);
+    } else {
+        // Move the exponent from the float into the half.
+        value = std::ldexp(value, 11 - exp);
+        bits |= ((exp + 13) << 10);
+    }
+
+    // We've normalized value as much as possible. Put the integer
+    // portion of it into the mantissa.
+    float ival;
+    float frac = std::modf(value, &ival);
+    bits += (uint16_t)(std::abs((int)ival));
+
+    // Now consider the fractional part. We round to nearest with ties
+    // going to even.
+    frac = std::abs(frac);
+    bits += (frac > 0.5f) | ((frac == 0.5f) & bits);
+
+    return bits;
 }
 
 int main(int argc, char **argv) {                                     
@@ -40,12 +85,12 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> image(imgW, imgH);
     for (int y = 0; y < imgH; y++) {
         for (int x = 0; x < imgW; x++) {
-            image(x, y) = uint16_t(rand() % 100);
+            image(x, y) = float_to_float16(rand() & 1); //uint16_t(rand() % 20);
         }
     }
 
     // Create output buffer
-    Buffer<float> output(imgW - kSize, imgH);
+    Buffer<float> output(imgW - kSize, imgH - kSize);
 
 #if defined(RUN_conv1d)
     // Create kernel buffer                                           
@@ -73,9 +118,9 @@ int main(int argc, char **argv) {
             for (int x = 0; x < imgW - kSize; x++) {
                 float expected = 0.0f;
                 for (int k = 0; k < kSize; k++) {
-                    expected += bfloat16_to_float(kernel(k)) * bfloat16_to_float(image(x + k, y));
+                    expected += halide_float16_bits_to_float(kernel(k)) * halide_float16_bits_to_float(image(x + k, y));
                 }
-                if (fabs(expected - output(x, y)) > 0.001f) {
+                if (fabs(expected - output(x, y)) > 0.1f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << output(x, y) << " != " << expected << "\n";
                     success = false;
@@ -96,10 +141,13 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> kernel(kSize, kSize);                                   
     for (int i = 0; i < kSize; i++) {
         for (int j = 0; j < kSize; j++) {
-            kernel(i, j) = uint16_t(i * kSize + j);
+            kernel(i, j) = float_to_float16((i ^ j) & 1);
         }
     }
     
+    image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+    kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {   
         conv2d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
@@ -120,14 +168,31 @@ int main(int argc, char **argv) {
                 float expected = 0.0f;
                 for (int ky = 0; ky < kSize; ky++) {
                     for (int kx = 0; kx < kSize; kx++) {
-                        expected += bfloat16_to_float(kernel(kx, ky)) * bfloat16_to_float(image(x + kx, y + ky));
+                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
                     }
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
+                              << std::fixed << std::setprecision(10) 
                               << output(x, y) << " != " << expected << "\n";
                     success = false;
                 }
+            }
+        }
+
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                int rand_x = rand() % (imgW - kSize);
+                int rand_y = rand() % (imgH - kSize);
+                float expected = 0.0f;
+                for (int ky = 0; ky < kSize; ky++) {
+                    for (int kx = 0; kx < kSize; kx++) {
+                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
+                    }
+                }
+                std::cout << "(" << rand_x << ", " << rand_y << ") " 
+                         << std::fixed << std::setprecision(10) 
+                         << output(rand_x, rand_y) << " " << expected << "\n";
             }
         }
 
