@@ -892,16 +892,16 @@ struct SubstKernelLoads : public EqSatIRMutator {
         this->offset = offset;
     }
 
-    Expr visit(const Call* call) override {
+    Expr visit(const Call *call) override {
         // Check all loads
         if (starts_with(call->name, "wmma.load")) {
-            const Variable* buff = call->args[0].as<Variable>();
+            const Variable *buff = call->args[0].as<Variable>();
             if (buff && buff->name == old_buffer_name) {
                 std::vector<Expr> args = call->args;
                 args[0] = Variable::make(args[0].type(), new_buffer_name);
                 args[1] = args[1] + offset;
                 return Call::make(call->type, call->name, args, call->call_type, call->func, call->value_index, call->image, call->param);
-            }            
+            }
         }
         return EqSatIRMutator::visit(call);
     }
@@ -920,18 +920,18 @@ struct SubstStores : public EqSatIRMutator {
 
     SubstStores(std::map<std::string, Stmt> &&stores)
         : stores(stores) {
-            inside_gpu_kernel.push(false);
+        inside_gpu_kernel.push(false);
     }
 
-    auto merge_convolution_shuffles(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues, Stmt& s) {
+    auto merge_convolution_shuffles(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues, Stmt &s) {
         // If the prologue is a ConvolutionShuffle call, we can merge it with an existing pending_definition
         // if it reads from contiguous memory locations
         std::vector<RemoveGLoadsAndGVars::PrologueStmt> rem_prologues;
-        for (const auto& prologue : prologues) {
+        for (const auto &prologue : prologues) {
             bool merged = false;
 
             // If new prologue is a ConvolutionShuffle
-            const Call* new_call = prologue.expr.as<Call>();
+            const Call *new_call = prologue.expr.as<Call>();
             if (new_call && new_call->name == "ConvolutionShuffle") {
                 // And if a pending_definition is also a ConvolutionShuffle
                 for (size_t idx = 0; idx < pending_definitions.size(); ++idx) {
@@ -953,7 +953,7 @@ struct SubstStores : public EqSatIRMutator {
                         Expr base2 = new_call->args[1];
                         can_merge = can_merge && equal(simplify(base1 + length1 * stride), simplify(base2));
 
-                        if (can_merge) {   
+                        if (can_merge) {
                             Expr buffer = existing_call->args[0];
                             Expr length2 = new_call->args[3];
                             Expr taps = simplify(length1 + length2);
@@ -973,8 +973,7 @@ struct SubstStores : public EqSatIRMutator {
                                 existing_call->func,
                                 existing_call->value_index,
                                 existing_call->image,
-                                existing_call->param
-                            );
+                                existing_call->param);
 
                             int offset = existing_call->type.lanes();
 
@@ -1023,11 +1022,10 @@ struct SubstStores : public EqSatIRMutator {
                         call_stmt->func,
                         call_stmt->value_index,
                         call_stmt->image,
-                        call_stmt->param
-                    );
+                        call_stmt->param);
                     store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
-                    //store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
-                    
+                    // store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
+
                     body = Block::make(store_stmt, body);
 
                     BufferBuilder builder;
@@ -1044,13 +1042,13 @@ struct SubstStores : public EqSatIRMutator {
                     body = Block::make(store_stmt, body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 }
-                
+
                 it = pending_definitions.erase(it);
             } else {
                 ++it;
             }
         }
-        
+
         return body;
     }
 
@@ -1062,11 +1060,10 @@ struct SubstStores : public EqSatIRMutator {
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
 
-        //if (op->for_type == ForType::GPULane) {
-            body = insert_pending_definitions(body);
+        // if (op->for_type == ForType::GPULane) {
+        body = insert_pending_definitions(body);
         //}
-        
-        
+
         inside_gpu_kernel.pop();
 
         return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
@@ -1077,7 +1074,7 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-        
+
         body = insert_pending_definitions(body);
 
         return LetStmt::make(op->name, mutate(op->value), body);
@@ -1248,7 +1245,7 @@ class EnforceWMMALanes : public IRMutator {
             return -1;
         }
         int vec_length = ramp->lanes;
-        internal_assert(can_prove(ramp->base % vec_length == 0)) << "Cannot determine which WMMA tile to load from";
+        internal_assert(can_prove(ramp->base % vec_length == 0)) << "Cannot determine which WMMA tile to load from: " << ramp->base;
         return ramp->base / vec_length;
     }
 
@@ -1281,19 +1278,19 @@ protected:
 
     Expr visit(const Call *op) override {
         // if (
-        //     op->name.find("load.a") != string::npos 
-        //     || 
+        //     op->name.find("load.a") != string::npos
+        //     ||
         //     op->name.find("load.b") != string::npos
         // ) {
         //     wmma_used = true;
         //     return make_zero(Int(32, 8));
 
-        // } else 
+        // } else
         // if (op->name.find("row.row") != string::npos) {
         //     wmma_used = true;
         //     return make_one(Float(32, 8));
 
-        // } else 
+        // } else
         if (intrinsic_types.count(op->name)) {
             wmma_used = true;
             internal_assert(op->type.lanes() % 32 == 0);
@@ -1364,7 +1361,7 @@ protected:
             Expr value = mutate(store->value);
             internal_assert(wmma_used);
             wmma_used = false;
-            
+
             auto op = Store::make(
                 store->name,
                 value,
@@ -1406,26 +1403,26 @@ protected:
 
             std::cout << "DistributedConvolutionShuffle: " << store->name << " " << store->index << " " << store->value << std::endl;
 
-            /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so 
+            /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so
                it works for now */
             int out_matrix_rows = (pixels + taps);
 
             // todo(maaz): We currently only handle cases where lanes are divisible by mat_cnt
             internal_assert(32 % mat_cnt == 0);
 
-            int rows_per_lane = (out_matrix_rows *  mat_cnt)/ 32;
+            int rows_per_lane = (out_matrix_rows * mat_cnt) / 32;
             int wlanes_per_mat = 32 / mat_cnt;
 
             std::vector<Stmt> stores;
             vector<int> indices;
-            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, kernel_taps.value() ), {}, {}, const_true(kernel_taps.value()), {});
+            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, kernel_taps.value()), {}, {}, const_true(kernel_taps.value()), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
 
-            for (int warp_lane=0; warp_lane<32; warp_lane++) {
+            for (int warp_lane = 0; warp_lane < 32; warp_lane++) {
                 int mat_id = warp_lane / wlanes_per_mat;
                 int row_base = (warp_lane % wlanes_per_mat) * rows_per_lane;
                 int row_max = row_base + rows_per_lane;
-                
+
                 for (int j = row_base; j < row_max; j++) {
                     for (int i = 0; i < pixels; i++) {
                         if (0 <= j - i && j - i < taps) {
@@ -1436,10 +1433,11 @@ protected:
                     }
                 }
 
-                int new_indices = (row_max-row_base)*pixels;
+                int new_indices = (row_max - row_base) * pixels;
 
-                for (int i = warp_lane*new_indices; i < warp_lane*new_indices + new_indices; i++) {
-                    indices[i] = std::min(static_cast<int>(kernel_taps.value()), static_cast<int>(indices[i] + (8 * mat_id)));
+                for (int i = warp_lane * new_indices; i < warp_lane * new_indices + new_indices; i++) {
+                    indices[i] = std::min(static_cast<int>(kernel_taps.value()),
+                                          static_cast<int>(indices[i] + (8 * mat_id)));
                 }
             }
 
@@ -1447,8 +1445,8 @@ protected:
             auto v = Shuffle::make({vec1, vec2}, indices);
 
             Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
-            
-            //Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
+
+            // Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
 
             return new_store;
         }
@@ -1622,16 +1620,6 @@ Stmt post_process_wmma(const Stmt &s) {
 std::string run_egglog(std::vector<std::pair<std::string, std::string>> &&binding) {
 #include "egglog/main.tmpl.h"
 
-
-
-
-
-
-
-
-
-
-
     std::string egglog_prog = EGGLOG_PROG(std::move(binding));
 
     std::string filename = "/tmp/egglog_prog_" + std::to_string(getpid()) + ".egg";
@@ -1674,7 +1662,8 @@ std::string run_egglog(std::vector<std::pair<std::string, std::string>> &&bindin
     close(pipe_stdout[1]);
 
     // Write to the subprocess's stdin
-    write(pipe_stdin[1], egglog_prog.c_str(), egglog_prog.size());
+    size_t written = write(pipe_stdin[1], egglog_prog.c_str(), egglog_prog.size());
+    internal_assert(written > 0);
     close(pipe_stdin[1]);
 
     // Read from the subprocess's stdout

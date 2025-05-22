@@ -620,6 +620,13 @@ class InjectBufferCopies : public IRMutator {
     };
 
     Stmt visit(const Allocate *op) override {
+        if (op->free_function == "halide_device_host_nop_free") {
+            // Hack: This is the second time we've run
+            // inject_host_dev_buffer_copies, and this allocation was already
+            // turned into a single combined allocation last run.
+            return IRMutator::visit(op);
+        }
+
         FindBufferUsage finder(op->name, DeviceAPI::Host);
         op->body.accept(&finder);
 
