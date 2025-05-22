@@ -107,7 +107,6 @@ public:
                 .split(k, rro, rri, tile_r)
                 .split(rro, rro, rroo, 4)
                 .reorder({rri, rxi, ryi, x, y, rroo, rro})
-                // .reorder({rri, rxi, ryi, x, y, rro})
                 .unroll(rroo)
                 .unroll(x)
                 .unroll(y)
@@ -115,10 +114,6 @@ public:
                 .vectorize(rri)
                 .vectorize(rxi)
                 .vectorize(ryi);
-
-            //matB.in(prod).compute_at(prod, rroo).store_in(MemoryType::WMMAB)
-              //  .vectorize(_0)
-                //.vectorize(_1);
         }
     }
 
