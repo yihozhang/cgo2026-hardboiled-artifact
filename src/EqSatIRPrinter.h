@@ -16,16 +16,20 @@ class EqSatIRPrinter : public EqSatExtensions::EqSatIRVisitor {
 public:
     /** Construct an IRPrinter pointed at a given output stream
      * (e.g. std::cout, or a std::ofstream) */
-    explicit EqSatIRPrinter(std::ostream &stream) : stream(stream) {}
+    explicit EqSatIRPrinter(std::ostream &stream)
+        : stream(stream) {
+    }
 
     /** emit an expression on the output stream */
     void print(const Expr &);
     void print(const Stmt &);
 
 protected:
+    using EqSatExtensions::EqSatIRVisitor::visit;
+
     /** The stream on which we're outputting */
     std::ostream &stream;
-    void print_type(const Type& t) const;
+    void print_type(const Type &t) const;
     void visit(const IntImm *) override;
     void visit(const UIntImm *) override;
     void visit(const FloatImm *) override;
@@ -64,13 +68,12 @@ protected:
         internal_error << "GVariable not supported\n";
     }
     void visit(const EqSatExtensions::Computed *) override {
-            internal_error << "Computed not supported\n";
+        internal_error << "Computed not supported\n";
     }
     void visit(const Store *) override;
 };
 
 }  // namespace Internal
 }  // namespace Halide
-
 
 #endif

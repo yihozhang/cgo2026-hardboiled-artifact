@@ -1,6 +1,7 @@
 #include "EqSatIRPrinter.h"
 #include "Error.h"
 #include "Expr.h"
+#include "Substitute.h"
 
 #define GENERATE_VISIT_BINOP(NAME)                                               \
     void EqSatIRPrinter::visit(const NAME *e) {                                  \
@@ -162,7 +163,8 @@ void EqSatIRPrinter::visit(const Call *e) {
 }
 
 void EqSatIRPrinter::visit(const Let *e) {
-    user_error << "Not supported\n";
+    Expr equiv = substitute(e->name, e->value, e->body);
+    equiv.accept(this);
 }
 
 void EqSatIRPrinter::visit(const VectorReduce *e) {
@@ -183,6 +185,7 @@ std::string string_from_loc(EqSatExtensions::Location loc) {
     case EqSatExtensions::Location::WMMA_B:
         return "(WMMA_B)";
     }
+    return std::string{};
 }
 
 void EqSatIRPrinter::visit(const EqSatExtensions::LocToLoc *e) {
