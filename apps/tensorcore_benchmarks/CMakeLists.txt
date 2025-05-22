@@ -50,6 +50,7 @@ add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_86)
 add_executable(conv1d process.cpp)
 add_executable(conv2d process.cpp)
 add_executable(matmul process.cpp)
+add_executable(matmul_cublas matmul_baseline.cpp)
 
 target_compile_definitions(conv1d
     PRIVATE
@@ -86,6 +87,25 @@ target_compile_definitions(matmul
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
+target_compile_definitions(matmul_cublas
+    PRIVATE
+    MATMUL_M=${MATMUL_M}
+    MATMUL_N=${MATMUL_N}
+    MATMUL_K=${MATMUL_K}
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
+# Add command line argument handling
+if(CMAKE_ARGC GREATER 3)
+    set(MATMUL_M ${CMAKE_ARGV3} CACHE STRING "Rows of the input matrix A" FORCE)
+endif()
+if(CMAKE_ARGC GREATER 4)
+    set(MATMUL_N ${CMAKE_ARGV4} CACHE STRING "Columns of the input matrix B" FORCE)
+endif()
+if(CMAKE_ARGC GREATER 5)
+    set(MATMUL_K ${CMAKE_ARGV5} CACHE STRING "Columns of the input matrix A / Rows of the input matrix B" FORCE)
+endif()
+
 target_link_libraries(conv1d
     PRIVATE
     conv1d_lib
@@ -103,3 +123,12 @@ target_link_libraries(matmul
     matmul_lib
     Halide::Tools
 )
+
+target_link_libraries(matmul_cublas
+    PRIVATE
+    ${CUDA_LIBRARIES}
+    ${CUBLAS_LIBRARIES}
+    Halide::Tools
+)
+
+target_include_directories(matmul_cublas PRIVATE ${CUDA_INCLUDE_DIRS})
