@@ -32,6 +32,7 @@ include(cmake/TensorCoreHelpers.cmake)
 add_halide_generator(conv1d.generator SOURCES conv1d_generator.cpp)
 add_halide_generator(conv2d.generator SOURCES conv2d_generator.cpp)
 add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
+add_halide_generator(upsample.generator SOURCES upsample_generator.cpp)
 
 # Create compiled libraries (adding extra targets for cross-compilation)
 add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_86)
@@ -42,6 +43,10 @@ add_conv_library(conv2d_lib conv2d host-cuda-cuda_capability_86)
 add_conv_library(conv2d_lib_win conv2d x86-64-windows-cuda-cuda_capability_86)
 add_conv_library(conv2d_lib_linux conv2d x86-64-linux-cuda-cuda_capability_86)
 
+add_conv_library(upsample_lib upsample host-cuda-cuda_capability_86)
+add_conv_library(upsample_lib_win upsample x86-64-windows-cuda-cuda_capability_86)
+add_conv_library(upsample_lib_linux upsample x86-64-linux-cuda-cuda_capability_86)
+
 add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_86)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_86)
 add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_86)
@@ -50,6 +55,9 @@ add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_86)
 add_executable(conv1d process.cpp)
 add_executable(conv2d process.cpp)
 add_executable(matmul process.cpp)
+add_executable(upsample process.cpp)
+
+add_executable(matmul_cublas matmul_baseline.cpp)
 
 target_compile_definitions(conv1d
     PRIVATE
@@ -74,6 +82,18 @@ target_compile_definitions(conv2d
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
+target_compile_definitions(upsample
+    PRIVATE
+    BENCHMARK_HEADER="upsample_lib.h"
+    BENCHMARK_NAME="upsample"
+    RUN_upsample
+    KERNEL_SIZE=${CONV_KERNEL_SIZE}
+    IMG_ROW=${CONV_IMG_ROW}
+    IMG_COL=${CONV_IMG_COL}
+    SCHEDULE="${SCHEDULE}"
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
 target_compile_definitions(matmul
     PRIVATE
     BENCHMARK_HEADER="matmul_lib.h"
@@ -83,6 +103,14 @@ target_compile_definitions(matmul
     MATMUL_N=${MATMUL_N}
     MATMUL_K=${MATMUL_K}
     SCHEDULE="${SCHEDULE}"
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
+target_compile_definitions(matmul_cublas
+    PRIVATE
+    MATMUL_M=${MATMUL_M}
+    MATMUL_N=${MATMUL_N}
+    MATMUL_K=${MATMUL_K}
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
@@ -103,3 +131,11 @@ target_link_libraries(matmul
     matmul_lib
     Halide::Tools
 )
+target_link_libraries(matmul_cublas
+    PRIVATE
+    ${CUDA_LIBRARIES}
+    ${CUBLAS_LIBRARIES}
+    Halide::Tools
+)
+
+target_include_directories(matmul_cublas PRIVATE ${CUDA_INCLUDE_DIRS})
