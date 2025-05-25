@@ -475,6 +475,8 @@ SOURCE_FILES = \
   Elf.cpp \
   EliminateBoolVectors.cpp \
   EmulateFloat16Math.cpp \
+  EqSatIRParser.cpp \
+  EqSatIRPrinter.cpp \
   Error.cpp \
   Expr.cpp \
   ExtractTileOperations.cpp \
@@ -671,6 +673,8 @@ HEADER_FILES = \
   Elf.h \
   EliminateBoolVectors.h \
   EmulateFloat16Math.h \
+  EqSatIRParser.h \
+  EqSatIRPrinter.h \
   Error.h \
   Expr.h \
   ExprUsesVar.h \
@@ -713,6 +717,7 @@ HEADER_FILES = \
   LLVM_Output.h \
   LLVM_Runtime_Linker.h \
   LoopCarry.h \
+  LoopPartitioningDirective.h \
   Lower.h \
   LowerParallelTasks.h \
   LowerWarpShuffles.h \
@@ -731,6 +736,7 @@ HEADER_FILES = \
   PartitionLoops.h \
   Pipeline.h \
   Prefetch.h \
+  PrefetchDirective.h \
   Profiling.h \
   PurifyIndexMath.h \
   PythonExtensionGen.h \

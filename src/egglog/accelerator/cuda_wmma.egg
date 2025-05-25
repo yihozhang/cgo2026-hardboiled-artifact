@@ -1,0 +1,310 @@
+; prog +=  R"***(
+
+
+;; Specification of different tile sizes for WMMA
+;; We leave the type (f16 vs bf16) and layout (row major vs column major) as a future TODO
+(datatype WMMATileConfig 
+    (Tile i64 i64 i64))
+
+(relation WMMATileA (WMMATileConfig String))
+(WMMATileA (Tile 16 16 16) "wmma.load.a.sync.aligned.row.m16n16k16.f16")
+(WMMATileA (Tile 32 8 16) "wmma.load.a.sync.aligned.row.m32n8k16.f16")
+(relation WMMATileB (WMMATileConfig String))
+(WMMATileB (Tile 16 16 16) "wmma.load.b.sync.aligned.row.m16n16k16.f16")
+(WMMATileB (Tile 32 8 16) "wmma.load.b.sync.aligned.row.m32n8k16.f16")
+(relation WMMATileC (WMMATileConfig String i64))
+(WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f32" 32)
+(WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f16" 16)
+(WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f32" 32)
+(relation WMMAGEMM (WMMATileConfig String i64))
+(WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32" 32)
+(WMMAGEMM (Tile 32 8 16) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32" 32)
+(WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16" 16)
+(relation WMMATileD (WMMATileConfig String i64))
+(WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f32" 32)
+(WMMATileD (Tile 32 8 16) "wmma.store.d.sync.aligned.row.m32n8k16.f32" 32)
+(WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f16" 16)
+
+
+;; different from WMMA, the last column denotes number of elements rather than colbytes
+(relation WMMAAllocation (String i64 i64))
+(relation WMMAShape (Expr i64 i64))
+
+(rule (
+        (WMMAAllocation name rows cols)
+        (= e (Var t (V name)))
+    ) (
+        (WMMAShape e rows cols)
+    ))
+(rule (
+        (WMMAShape e rows cols)
+        (Store name e index)
+    ) (
+        (WMMAAllocation name rows cols)
+    ))
+; TODO: this rule is wrong: it requires the index to be a linear scan instead of an arbitrary expression
+(rule (
+        (WMMAAllocation name rows cols)
+        (Store name e index)
+    ) (
+        (WMMAShape e rows cols)
+    ))
+
+;; Axiomatic rules about WMMA2Mem and Mem2WMMA
+
+(birewrite (Cast ty (WMMA2Mem e)) (WMMA2Mem (Cast ty e)))
+(birewrite (Cast ty (Mem2WMMA e)) (Mem2WMMA (Cast ty e)))
+(birewrite (BroadcastPer p (Mem2WMMA e) l) (Mem2WMMA (BroadcastPer p e l)))
+(birewrite (WMMA2Mem (BroadcastPer p e l)) (BroadcastPer p (WMMA2Mem e) l))
+(birewrite (Broadcast (Mem2WMMA e) l) (Mem2WMMA (Broadcast e l)))
+(birewrite (WMMA2Mem (Broadcast e l)) (Broadcast (WMMA2Mem e) l))
+
+
+(relation wmma-f16-rhs (
+    Expr ;; orig-expr
+    WMMATileConfig
+    Expr ;; rhs-expr
+))
+
+(rule (
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+
+    (= rhs-index
+        (Broadcast
+            (Ramp (Ramp rhs-base
+                    rhs-r-stride
+                    r-lanes
+                )
+                (Broadcast (IntImm32 1) r-lanes)
+                y-lanes
+            )
+            x-lanes
+        )
+    )
+
+    (= tile (Tile x-lanes y-lanes r-lanes))
+    (WMMATileB tile wmma-intrinsic)
+) (
+    (let new-rhs (Call wmma-intrinsic (Float 16 256) (vec-of (Var (Handle 1) rhs-name) rhs-base rhs-r-stride)))
+    (wmma-f16-rhs rhs tile new-rhs)
+))
+
+
+
+; (wmma-f16-rhs 
+;     (WMMA2Mem (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 ) 16) 16))) 
+;     16 16 16
+;     (Load ty name (Ramp (Ramp (IntImm32 0) (IntImm32 16) 16) (Broadcast (IntImm32 1) 16) 16)))
+(rule (
+    (= orig-rhs-mem (WMMA2Mem orig-rhs))
+    (= orig-rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+    (= rhs-index
+        (Broadcast
+            (Ramp (Ramp rhs-base rhs-r-stride r-lanes)
+                  (Broadcast (IntImm32 1) r-lanes)
+                   y-lanes)
+            x-lanes))
+) (
+    (let new-rhs (Load (Float 16 (* r-lanes y-lanes)) rhs-name (Ramp rhs-base (IntImm32 1) (* r-lanes y-lanes))))
+    (wmma-f16-rhs orig-rhs-mem (Tile x-lanes y-lanes r-lanes) new-rhs)
+))
+
+(rule (
+        (= e (Bop (Add)
+                (VectorReduce (Float acc-bits out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float acc-bits tot-lanes) lhs)
+                        (Cast (Float acc-bits tot-lanes) rhs))
+                )
+                mat))
+        (= out-lanes (* x-lanes y-lanes))
+        (= tot-lanes (* out-lanes r-lanes))
+
+        (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+        (= lhs-index
+            (Ramp (Broadcast (Ramp lhs-base (IntImm32 1) r-lanes) y-lanes)
+                (Broadcast x-stride (* y-lanes r-lanes))
+                x-lanes)
+        )
+
+        (= tile (Tile x-lanes y-lanes r-lanes))
+        (wmma-f16-rhs rhs tile new-rhs)
+
+        (WMMATileA tile intrinsic-A)
+        (WMMAGEMM tile intrinsic-GEMM acc-bits)
+
+    ) (
+        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
+        (let new-mat (Mem2WMMA mat))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs new-mat)))
+        (WMMAShape new-e x-lanes y-lanes)
+
+        (union e (WMMA2Mem new-e))
+    ))
+
+(rule (
+        (= e 
+                (VectorReduce (Float acc-bits out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float acc-bits tot-lanes) lhs)
+                        (Cast (Float acc-bits tot-lanes) rhs))
+                ))
+        (= out-lanes (* x-lanes y-lanes))
+        (= tot-lanes (* out-lanes r-lanes))
+
+        (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+        (= lhs-index
+            (Ramp (Broadcast (Ramp lhs-base (IntImm32 1) r-lanes) y-lanes)
+                (Broadcast x-stride (* y-lanes r-lanes))
+                x-lanes)
+        )
+
+        (= tile (Tile x-lanes y-lanes r-lanes))
+        (wmma-f16-rhs rhs tile new-rhs)
+
+        (WMMATileA tile intrinsic-A)
+        (WMMAGEMM tile intrinsic-GEMM acc-bits)
+        (WMMATileC tile intrinsic-C acc-bits)
+
+    ) (
+        (let initial (Call (+ intrinsic-C ".ZERO") (Float acc-bits 256) (vec-of (IntImm32 0))))
+        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs initial)))
+        (WMMAShape new-e x-lanes y-lanes)
+        (union e (WMMA2Mem new-e))
+    ))
+
+
+(rule (
+        (= e (Mem2WMMA
+                (Broadcast
+                    (FloatImm bits 0.0)
+                    lanes
+                )))
+        (WMMAShape e rows cols)
+        (= lanes (* rows cols))
+
+        (WMMATileC (Tile rows cols _k) intrinsic bits)
+    ) (
+        (let new-e (Call (+ intrinsic ".ZERO") (Float bits lanes) (vec-of (IntImm32 0))))
+        ; (let new-e (Call intrinsic (Float 32 lanes) (vec-of (Var (Handle 1) (ExprVar (Mem) 
+        (union e new-e)
+    ))
+
+(rule (
+    (= e (WMMA2Mem wmma-expr))
+    (WMMAShape wmma-expr n-lanes k-lanes)
+    (has-type e (Float bits 256))
+    (WMMATileD (Tile n-lanes _m k-lanes) intrinsic bits)
+) (
+    (let load-var (ExprVar (Mem)
+        (Call intrinsic (Int 32 1) (vec-of (Var (Handle 1) (V "DUMMY_STORE_NAME")) wmma-expr (IntImm32 0) (IntImm32 k-lanes)))))
+    (let index (Ramp (Ramp (IntImm32 0) (IntImm32 1) k-lanes) (Broadcast (IntImm32 k-lanes) k-lanes) n-lanes))
+    (let new-e (Load (Float bits (* n-lanes k-lanes)) load-var index))
+    (union e new-e)
+))
+
+(rule (
+        (= s (Store store-name (WMMA2Mem tile) index))
+        (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
+        (has-type tile (Float bits _lanes))
+
+        (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
+    ) (
+        (let new-s (Evaluate
+                (Call intrinsic (Int 32 1)
+                    (vec-of (Var (Handle 1) (V store-name))
+                        tile
+                        base
+                        n-stride
+                    ))))
+        (union s new-s)
+    ))
+
+
+;; loading matrices A and B
+
+(rule (
+    (= e (Mem2WMMA
+        (Load ty name index)))
+    (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
+    (= ty (Float 16 _lanes))
+
+    (WMMATileB (Tile _l m-lanes n-lanes) wmma-intrinsic)
+) (
+    (let new-e (Call wmma-intrinsic ty (vec-of (Var (Handle 1) name) base n-stride)))
+    (union e new-e)
+))
+
+(rule (
+    (= e (Bop (Add)
+            (VectorReduce (Float 32 out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float 32 tot-lanes) lhs)
+                    (Cast (Float 32 tot-lanes) rhs))
+            )
+            mat))
+    (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+
+    (= lhs-index 
+        (Ramp 
+            (Ramp 
+                (Ramp bl s1a l1) 
+                (Broadcast s2 l1) 
+                l2) 
+            (Broadcast s3 (* l1 l2)) 
+            l3))
+    (= rhs-index 
+        (Broadcast 
+            (Broadcast (Ramp br s1b l1) l2) l3))
+
+    (= s2 s1a)
+    (= s1a (IntImm32 1))
+    (= lhs-inner-offset 1)
+    ;; NB: if we relax the restriction to be that lhs-inner-offset 
+    ;; can be greater than 0, then we need to pass that
+    ;; lhs-inner-offset to ConvolutionShuffle
+    ; (= (% s2 s1a) 0)
+    ; (= (/ s1 s1a) lhs-inner-offset)
+) (
+    (let new-l1 (+ l1 (* lhs-inner-offset l2)))
+    (let new-tot-lanes (* (* new-l1 l2) l3))
+    (let new-lhs-index
+        (Ramp 
+            (Broadcast 
+                (Ramp bl s1a new-l1)
+                l2)
+            (Broadcast s3 (* new-l1 l2))
+            l3)
+    )
+    (let new-lhs (Load (Float 16 new-tot-lanes) lhs-name new-lhs-index))
+    
+    (let new-rhs-index 
+        (Broadcast 
+            (Ramp 
+                (Ramp (IntImm32 0) (IntImm32 l2) new-l1)
+                (Broadcast (IntImm32 1) new-l1)
+                l2)
+            l3))
+    (let new-rhs-name
+        (ExprVar (Mem)
+            (Call "ConvolutionShuffle" (Float 16 (* new-l1 l2))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2)))
+        )
+    )
+    (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
+
+    (let new-e 
+        (Bop (Add)
+                (VectorReduce (Float 32 out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float 32 new-tot-lanes) new-lhs)
+                        (Cast (Float 32 new-tot-lanes) new-rhs))
+                )
+                mat))
+
+    (union e new-e)
+))
+
+; )***"; prog += "\n";

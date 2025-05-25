@@ -58,6 +58,8 @@ public:
         return "cuda";
     }
 
+    std::map<std::string, MemoryType> memory_type_of;
+
 protected:
     using CodeGen_LLVM::visit;
 
@@ -138,7 +140,7 @@ void CodeGen_PTX_Dev::add_kernel(Stmt stmt,
     vector<llvm::Type *> arg_types(args.size());
     for (size_t i = 0; i < args.size(); i++) {
         if (args[i].is_buffer) {
-            arg_types[i] = PointerType::get(llvm_type_of(UInt(8)), 0);
+            arg_types[i] = ptr_t;
         } else {
             arg_types[i] = llvm_type_of(args[i].type);
         }
@@ -155,6 +157,8 @@ void CodeGen_PTX_Dev::add_kernel(Stmt stmt,
             function->addParamAttr(i, Attribute::NoAlias);
         }
     }
+
+    function->setCallingConv(llvm::CallingConv::PTX_Kernel);
 
     // Make the initial basic block
     entry_block = BasicBlock::Create(*context, "entry", function);
@@ -227,6 +231,7 @@ void CodeGen_PTX_Dev::init_module() {
         Type ret_type;
         const char *intrin_name;
         vector<Type> arg_types;
+        bool access_memory;
     };
 
     Intrinsic ptx_intrins[] = {
@@ -240,11 +245,39 @@ void CodeGen_PTX_Dev::init_module() {
         {"dp2a", UInt(32), "dp2a_u32_u32", {UInt(16, 4), UInt(8, 4), UInt(32)}},
         {"round", Float(32), "llvm.rint.f32", {Float(32)}},
         {"round", Float(64), "llvm.rint.f64", {Float(64)}},
+
+        {"wmma.load.a.sync.aligned.row.m16n16k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f16", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
+        {"wmma.load.a.sync.aligned.row.m16n16k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m16n16k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f32.p3i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f32.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f16.p3i32", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f32.p3i32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f32.p3i32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f16.p3i32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16.p3i32", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
+        {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.row.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
+        {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.row.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
+
+        {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m32n8k16.f32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.load.a.sync.aligned.row.m32n8k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m32n8k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m32n8k16.f32.p3i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32.p3i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m32n8k16.f32.p3i32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.mma.row.row.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
+
     };
 
     for (auto &&i : ptx_intrins) {
         auto *fn = declare_intrin_overload(i.name, i.ret_type, i.intrin_name, std::move(i.arg_types));
-        function_does_not_access_memory(fn);
+        if (!i.access_memory) {
+            function_does_not_access_memory(fn);
+        }
         fn->addFnAttr(llvm::Attribute::NoUnwind);
     }
 }
@@ -267,8 +300,22 @@ void CodeGen_PTX_Dev::visit(const Call *op) {
         return;
     }
 
-    // TODO: It would be better if CodeGen_LLVM could handle overloaded intrin calls by default.
-    value = call_overloaded_intrin(op->type, op->name, op->args);
+    if (op->name.find(".load.") != string::npos || op->name.find(".store.") != string::npos) {
+        string suffix;
+        auto it = memory_type_of.find(op->args[0].as<Variable>()->name);
+        if (it == memory_type_of.end()) {
+            suffix = "";
+        } else if (it->second == MemoryType::GPUShared) {
+            suffix = ".p3i32";
+        } else {
+            internal_error << "cannot load from local memory\n";
+        }
+        value = call_overloaded_intrin(op->type, op->name + suffix, op->args);
+    } else {
+        // TODO: It would be better if CodeGen_LLVM could handle overloaded intrin calls by default.
+        value = call_overloaded_intrin(op->type, op->name, op->args);
+    }
+
     if (!value) {
         CodeGen_LLVM::visit(op);
     }
@@ -307,9 +354,10 @@ void CodeGen_PTX_Dev::visit(const For *loop) {
 void CodeGen_PTX_Dev::visit(const Allocate *alloc) {
     user_assert(!alloc->new_expr.defined()) << "Allocate node inside PTX kernel has custom new expression.\n"
                                             << "(Memoization is not supported inside GPU kernels at present.)\n";
+    memory_type_of[alloc->name] = alloc->memory_type;
     if (alloc->memory_type == MemoryType::GPUShared) {
         // PTX uses zero in address space 3 as the base address for shared memory
-        Value *shared_base = Constant::getNullValue(PointerType::get(i8_t, 3));
+        Value *shared_base = Constant::getNullValue(PointerType::get(*context, 3));
         sym_push(alloc->name, shared_base);
     } else {
         debug(2) << "Allocate " << alloc->name << " on device\n";
@@ -613,11 +661,16 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     options.GuaranteedTailCallOpt = false;
 
     std::unique_ptr<TargetMachine>
-        target_machine(llvm_target->createTargetMachine(triple.str(),
-                                                        mcpu_target(), mattrs(), options,
-                                                        llvm::Reloc::PIC_,
-                                                        llvm::CodeModel::Small,
-                                                        CodeGenOptLevel::Aggressive));
+        target_machine(llvm_target->createTargetMachine(
+#if LLVM_VERSION >= 210
+            triple,
+#else
+            triple.str(),
+#endif
+            mcpu_target(), mattrs(), options,
+            llvm::Reloc::PIC_,
+            llvm::CodeModel::Small,
+            CodeGenOptLevel::Aggressive));
 
     internal_assert(target_machine.get()) << "Could not allocate target machine!";
 

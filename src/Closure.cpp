@@ -96,7 +96,12 @@ void Closure::visit(const Allocate *op) {
 void Closure::visit(const Variable *op) {
     if (ignore.contains(op->name)) {
         debug(DBG) << "Not adding var " << op->name << " to closure\n";
-    } else {
+    } 
+    // HACK: temporary definitions are not buffers
+    else if (op->type.is_handle() && op->name.find("temporary") == string::npos) {
+        found_buffer_ref(op->name, type_of<void *>(), true, true, Halide::Buffer<>());
+    } 
+    else {
         debug(DBG) << "Adding var " << op->name << " to closure\n";
         vars[op->name] = op->type;
     }

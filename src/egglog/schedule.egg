@@ -1,0 +1,45 @@
+; prog +=  R"***(
+
+(ruleset keep-best)
+(rule () ((keep-best __INPUTS__ "AMXShape" "AMXAllocation" "WMMAShape" "WMMAAllocation" "CommBop" "AddOrSub" "WMMATileA" "WMMATileB" "WMMATileC" "WMMAGEMM" "WMMATileD")) :ruleset keep-best)
+
+(run-schedule 
+    (repeat 14
+        (saturate (run typechecking))
+        (run)
+        (run amx)))
+;; These are not currently used
+(run-schedule (repeat 15 
+    (saturate (run typechecking))
+    (run push-down-vector-reduce)))
+
+; (keep-best __INPUTS__ "AMXShape" "AMXAllocation" "WMMAShape" "WMMAAllocation" "CommBop" "AddOrSub" "WMMATileA" "WMMATileB" "WMMATileC" "WMMAGEMM" "WMMATileD")
+
+(run-schedule (repeat 15
+    (saturate (run typechecking))
+    (repeat 1 (run))
+    ))
+(run-schedule (repeat 20
+    (saturate (run typechecking))
+    (repeat 1 (run canonicalize) (run))
+    ))
+(run-schedule (saturate
+    (saturate (run typechecking))
+    (repeat 1 (run assemble))
+    ))
+(run-schedule (repeat 6
+    (saturate (run typechecking))
+    (repeat 1 (run))
+    ))
+
+(keep-best __INPUTS__ "AMXShape" "AMXAllocation" "WMMAShape" "WMMAAllocation" "CommBop" "AddOrSub" "WMMATileA" "WMMATileB" "WMMATileC" "WMMAGEMM" "WMMATileD")
+
+(run-schedule (repeat 8
+    (saturate (run typechecking))
+    (repeat 1 (run))
+    ))
+
+
+; (ruleset subsume-invalid-exprs)
+
+; )***"; prog += "\n";
