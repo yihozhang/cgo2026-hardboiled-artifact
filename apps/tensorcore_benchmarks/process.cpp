@@ -272,6 +272,7 @@ int main(int argc, char **argv) {
     // Create output buffer
     Buffer<float> output(M, N);
 
+    setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
         matmul(matA.raw_buffer(), matB.raw_buffer(), output.raw_buffer());

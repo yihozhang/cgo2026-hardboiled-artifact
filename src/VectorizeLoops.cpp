@@ -191,117 +191,151 @@ Interval bounds_of_lanes(const Expr &e) {
     }
 };
 
-// A ramp with the lanes repeated inner_repetitions times, and then
-// the whole vector repeated outer_repetitions times.
-// E.g: <0 0 2 2 4 4 6 6 0 0 2 2 4 4 6 6>.
-struct InterleavedRamp {
-    Expr base, stride;
-    int lanes, inner_repetitions, outer_repetitions;
+struct MultiRamp {
+    Expr base;  // Must be scalar
+    struct Term {
+        int stride, lanes;
+        Term(int s, int l)
+            : stride(s), lanes(l) {
+        }
+    };
+    std::vector<Term> terms;  // From innermost out
+
+    void dump() const {
+        debug(0) << "MultiRamp " << base;
+        for (const auto &t : terms) {
+            debug(0) << " {" << t.stride << ", " << t.lanes << "}";
+        }
+        debug(0) << "\n";
+    }
 };
 
-bool equal_or_zero(int a, int b) {
-    return a == 0 || b == 0 || a == b;
-}
+MultiRamp operator+(const MultiRamp &a, const MultiRamp &b) {
+    MultiRamp result;
+    if (!a.base.defined() || !b.base.defined()) {
+        return result;
+    }
 
-bool is_interleaved_ramp(const Expr &e, const Scope<Expr> &scope, InterleavedRamp *result) {
-    if (const Ramp *r = e.as<Ramp>()) {
-        const Broadcast *b_base = r->base.as<Broadcast>();
-        const Broadcast *b_stride = r->stride.as<Broadcast>();
-        if (r->base.type().is_scalar()) {
-            result->base = r->base;
-            result->stride = r->stride;
-            result->lanes = r->lanes;
-            result->inner_repetitions = 1;
-            result->outer_repetitions = 1;
-            return true;
-        } else if (b_base && b_stride && b_base->lanes == b_stride->lanes) {
-            // Ramp of broadcast
-            result->base = b_base->value;
-            result->stride = b_stride->value;
-            result->lanes = r->lanes;
-            result->inner_repetitions = b_base->lanes;
-            result->outer_repetitions = 1;
-            return true;
-        }
-    } else if (const Broadcast *b = e.as<Broadcast>()) {
-        if (b->value.type().is_scalar()) {
-            result->base = b->value;
-            result->stride = 0;
-            result->lanes = b->lanes;
-            result->inner_repetitions = 0;
-            result->outer_repetitions = 0;
-            return true;
-        } else if (is_interleaved_ramp(b->value, scope, result)) {
-            // Broadcast of interleaved ramp
-            result->outer_repetitions *= b->lanes;
-            return true;
-        }
-    } else if (const Add *add = e.as<Add>()) {
-        InterleavedRamp ra;
-        if (is_interleaved_ramp(add->a, scope, &ra) &&
-            is_interleaved_ramp(add->b, scope, result) &&
-            equal_or_zero(ra.inner_repetitions, result->inner_repetitions) &&
-            equal_or_zero(ra.outer_repetitions, result->outer_repetitions)) {
-            result->base = simplify(result->base + ra.base);
-            result->stride = simplify(result->stride + ra.stride);
-            result->inner_repetitions = std::max(result->inner_repetitions, ra.inner_repetitions);
-            result->outer_repetitions = std::max(result->outer_repetitions, ra.outer_repetitions);
-            return true;
-        }
-    } else if (const Sub *sub = e.as<Sub>()) {
-        InterleavedRamp ra;
-        if (is_interleaved_ramp(sub->a, scope, &ra) &&
-            is_interleaved_ramp(sub->b, scope, result) &&
-            equal_or_zero(ra.inner_repetitions, result->inner_repetitions) &&
-            equal_or_zero(ra.outer_repetitions, result->outer_repetitions)) {
-            result->base = simplify(ra.base - result->base);
-            result->stride = simplify(ra.stride - result->stride);
-            result->inner_repetitions = std::max(result->inner_repetitions, ra.inner_repetitions);
-            result->outer_repetitions = std::max(result->outer_repetitions, ra.outer_repetitions);
-            return true;
-        }
-    } else if (const Mul *mul = e.as<Mul>()) {
-        std::optional<int64_t> b;
-        if (is_interleaved_ramp(mul->a, scope, result) &&
-            (b = as_const_int(mul->b))) {
-            result->base = simplify(result->base * (int)(*b));
-            result->stride = simplify(result->stride * (int)(*b));
-            return true;
-        }
-    } else if (const Div *div = e.as<Div>()) {
-        std::optional<int64_t> b;
-        if (is_interleaved_ramp(div->a, scope, result) &&
-            (b = as_const_int(div->b)) &&
-            is_const_one(result->stride) &&
-            (result->inner_repetitions == 1 ||
-             result->inner_repetitions == 0) &&
-            can_prove((result->base % (int)(*b)) == 0)) {
-            // TODO: Generalize this. Currently only matches
-            // ramp(base*b, 1, lanes) / b
-            // broadcast(base * b, lanes) / b
-            result->base = simplify(result->base / (int)(*b));
-            result->inner_repetitions *= (int)(*b);
-            return true;
-        }
-    } else if (const Mod *mod = e.as<Mod>()) {
-        std::optional<int64_t> b;
-        if (is_interleaved_ramp(mod->a, scope, result) &&
-            (b = as_const_int(mod->b)) &&
-            (result->outer_repetitions == 1 ||
-             result->outer_repetitions == 0) &&
-            can_prove(((int)(*b) % result->stride) == 0)) {
-            // ramp(base, 2, lanes) % 8
-            result->base = simplify(result->base % (int)(*b));
-            result->stride = simplify(result->stride % (int)(*b));
-            result->outer_repetitions *= (int)(*b);
-            return true;
-        }
-    } else if (const Variable *var = e.as<Variable>()) {
-        if (const Expr *e = scope.find(var->name)) {
-            return is_interleaved_ramp(*e, scope, result);
+    result.base = a.base + b.base;
+    size_t idx_a = 0, idx_b = 0;
+    MultiRamp::Term ta{0, 1}, tb{0, 1};
+    while (true) {
+        if (ta.lanes == 1 && idx_a < a.terms.size()) {
+            ta = a.terms[idx_a++];
+        } else if (tb.lanes == 1 && idx_b < b.terms.size()) {
+            tb = b.terms[idx_b++];
+        } else if (ta.lanes == 1 && tb.lanes == 1) {
+            internal_assert(idx_a == a.terms.size() &&
+                            idx_b == b.terms.size());
+            break;
+        } else if (ta.lanes == tb.lanes) {
+            result.terms.emplace_back(ta.stride + tb.stride, ta.lanes);
+            ta.lanes = tb.lanes = 1;
+        } else if (ta.lanes < tb.lanes && (tb.lanes % ta.lanes) == 0) {
+            result.terms.emplace_back(ta.stride + tb.stride, ta.lanes);
+            tb.lanes /= ta.lanes;
+            tb.stride *= ta.lanes;
+            ta.lanes = 1;
+        } else if (tb.lanes < ta.lanes && (ta.lanes % tb.lanes) == 0) {
+            result.terms.emplace_back(ta.stride + tb.stride, tb.lanes);
+            ta.lanes /= tb.lanes;
+            ta.stride *= tb.lanes;
+            tb.lanes = 1;
+        } else {
+            return MultiRamp{};
         }
     }
-    return false;
+    return result;
+}
+
+MultiRamp operator-(const MultiRamp &a, const MultiRamp &b) {
+    MultiRamp result;
+    if (!a.base.defined() || !b.base.defined()) {
+        return result;
+    }
+    result.base = a.base - b.base;
+    size_t idx_a = 0, idx_b = 0;
+    MultiRamp::Term ta{0, 1}, tb{0, 1};
+    while (true) {
+        if (ta.lanes == 1 && idx_a < a.terms.size()) {
+            ta = a.terms[idx_a++];
+        } else if (tb.lanes == 1 && idx_b < b.terms.size()) {
+            tb = b.terms[idx_b++];
+        } else if (ta.lanes == 1 && tb.lanes == 1) {
+            internal_assert(idx_a == a.terms.size() &&
+                            idx_b == b.terms.size());
+            break;
+        } else if (ta.lanes == tb.lanes) {
+            result.terms.emplace_back(ta.stride - tb.stride, ta.lanes);
+            ta.lanes = tb.lanes = 1;
+        } else if (ta.lanes < tb.lanes && (tb.lanes % ta.lanes) == 0) {
+            result.terms.emplace_back(ta.stride - tb.stride, ta.lanes);
+            tb.lanes /= ta.lanes;
+            tb.stride *= ta.lanes;
+            ta.lanes = 1;
+        } else if (tb.lanes < ta.lanes && (ta.lanes % tb.lanes) == 0) {
+            result.terms.emplace_back(ta.stride - tb.stride, tb.lanes);
+            ta.lanes /= tb.lanes;
+            ta.stride *= tb.lanes;
+            tb.lanes = 1;
+        } else {
+            return MultiRamp{};
+        }
+    }
+    return result;
+}
+
+MultiRamp operator*(const MultiRamp &a, int b) {
+    MultiRamp result;
+    if (!a.base.defined()) {
+        return result;
+    }
+    result.base = a.base * b;
+    for (const auto &term : a.terms) {
+        result.terms.emplace_back(term.stride * b, term.lanes);
+    }
+    return result;
+}
+
+// TODO: div and mod
+
+MultiRamp extract_multiramp(const Expr &e, const Scope<Expr> &scope) {
+    MultiRamp result;
+    if (e.type().is_scalar()) {
+        result.base = e;
+    } else if (const Ramp *ramp = e.as<Ramp>()) {
+        auto stride = as_const_int(ramp->stride);
+        if (stride) {
+            result = extract_multiramp(ramp->base, scope);
+            if (result.base.defined()) {
+                result.terms.emplace_back((int)(*stride), ramp->lanes);
+            }
+        }
+    } else if (const Broadcast *bc = e.as<Broadcast>()) {
+        result = extract_multiramp(bc->value, scope);
+        if (result.base.defined()) {
+            result.terms.emplace_back(0, bc->lanes);
+        }
+    } else if (const Add *add = e.as<Add>()) {
+        return extract_multiramp(add->a, scope) + extract_multiramp(add->b, scope);
+    } else if (const Sub *sub = e.as<Sub>()) {
+        return extract_multiramp(sub->a, scope) + extract_multiramp(sub->b, scope);
+    } else if (const Mul *mul = e.as<Mul>()) {
+        auto b = as_const_int(mul->b);
+        if (b) {
+            return extract_multiramp(mul->a, scope) * (int)(*b);
+        }
+    } else if (const Variable *var = e.as<Variable>()) {
+        if (const Expr *expr = scope.find(var->name)) {
+            return extract_multiramp(*expr, scope);
+        }
+    }
+    return result;
+}
+
+bool is_multiramp(const Expr &e, const Scope<Expr> &scope, MultiRamp *result) {
+    *result = extract_multiramp(e, scope);
+    return result->base.defined();
 }
 
 // Allocations inside vectorized loops grow an additional inner
@@ -765,8 +799,9 @@ class VectorSubs : public IRMutator {
 
         Expr mutated_body = mutate(op->body);
 
-        InterleavedRamp ir;
-        if (is_interleaved_ramp(mutated_value, vector_scope, &ir)) {
+        MultiRamp ir;
+        if (was_vectorized &&
+            is_multiramp(mutated_value, vector_scope, &ir)) {
             return substitute(vectorized_name, mutated_value, mutated_body);
         } else if (mutated_value.same_as(op->value) &&
                    mutated_body.same_as(op->body)) {
@@ -804,8 +839,9 @@ class VectorSubs : public IRMutator {
             vector_scope.pop(vectorized_name);
         }
 
-        InterleavedRamp ir;
-        if (is_interleaved_ramp(mutated_value, vector_scope, &ir)) {
+        MultiRamp ir;
+        if (was_vectorized &&
+            is_multiramp(mutated_value, vector_scope, &ir)) {
             return substitute(vectorized_name, mutated_value, mutated_body);
         } else if (mutated_value.same_as(op->value) &&
                    mutated_body.same_as(op->body)) {
@@ -1008,8 +1044,8 @@ class VectorSubs : public IRMutator {
                 string vectorized_name = get_widened_var_name(var);
                 Expr vectorized_value = vector_scope.get(vectorized_name);
                 vector_scope.pop(vectorized_name);
-                InterleavedRamp ir;
-                if (is_interleaved_ramp(vectorized_value, vector_scope, &ir)) {
+                MultiRamp ir;
+                if (is_multiramp(vectorized_value, vector_scope, &ir)) {
                     body = substitute(vectorized_name, vectorized_value, body);
                 } else {
                     body = LetStmt::make(vectorized_name, vectorized_value, body);
@@ -1192,31 +1228,23 @@ class VectorSubs : public IRMutator {
             Expr store_index = mutate(store->index);
             Expr load_index = mutate(load_a->index);
 
-            // The load and store indices must be the same interleaved
-            // ramp (or the same scalar, in the total reduction case).
-            InterleavedRamp store_ir, load_ir;
-            Expr test;
-            if (store_index.type().is_scalar()) {
-                test = simplify(load_index == store_index);
-            } else if (is_interleaved_ramp(store_index, vector_scope, &store_ir) &&
-                       is_interleaved_ramp(load_index, vector_scope, &load_ir) &&
-                       store_ir.inner_repetitions == load_ir.inner_repetitions &&
-                       store_ir.outer_repetitions == load_ir.outer_repetitions &&
-                       store_ir.lanes == load_ir.lanes) {
-                test = simplify(store_ir.base == load_ir.base &&
-                                store_ir.stride == load_ir.stride);
+            // The load and store indices must be the same multiramp
+            if (!can_prove(load_index == store_index)) {
+                break;
             }
-
-            if (!test.defined()) {
+            MultiRamp mr;
+            if (!is_multiramp(load_index, vector_scope, &mr)) {
                 break;
             }
 
-            if (is_const_zero(test)) {
-                break;
-            } else if (!is_const_one(test)) {
-                // TODO: try harder by substituting in more things in scope
-                break;
-            }
+            const auto &inner = mr.terms.front();
+            const auto &outer = mr.terms.back();
+            int inner_repetitions = mr.terms.empty()  ? b.type().lanes() :
+                                    inner.stride == 0 ? inner.lanes :
+                                                        1;
+            int outer_repetitions = (mr.terms.size() > 1 && outer.stride == 0) ? outer.lanes : 1;
+            // TODO: check if aside from the inner and outer repetitions, all
+            // remaining lanes are unique.
 
             auto binop = [=](const Expr &a, const Expr &b) {
                 switch (reduce_op) {
@@ -1242,22 +1270,33 @@ class VectorSubs : public IRMutator {
             if (store_index.type().is_scalar()) {
                 // The index doesn't depend on the value being
                 // vectorized, so it's a total reduction.
-
                 b = VectorReduce::make(reduce_op, b, 1);
             } else {
 
-                output_lanes = store_index.type().lanes() / (store_ir.inner_repetitions * store_ir.outer_repetitions);
+                output_lanes = store_index.type().lanes() / (inner_repetitions * outer_repetitions);
 
-                store_index = Ramp::make(store_ir.base, store_ir.stride, output_lanes / store_ir.base.type().lanes());
-                if (store_ir.inner_repetitions > 1) {
-                    b = VectorReduce::make(reduce_op, b, output_lanes * store_ir.outer_repetitions);
+                store_index = mr.base;
+
+                for (size_t i = 0; i < mr.terms.size(); i++) {
+                    if (mr.terms[i].stride != 0) {
+                        store_index = Ramp::make(store_index,
+                                                 make_const(store_index.type(), mr.terms[i].stride),
+                                                 mr.terms[i].lanes);
+                    }
+                }
+
+                internal_assert(store_index.type().lanes() == output_lanes)
+                    << store_index << " " << output_lanes << "\n";
+
+                if (inner_repetitions > 1) {
+                    b = VectorReduce::make(reduce_op, b, output_lanes * outer_repetitions);
                 }
 
                 // Handle outer repetitions by unrolling the reduction
                 // over slices.
-                if (store_ir.outer_repetitions > 1) {
+                if (outer_repetitions > 1) {
                     // First remove all powers of two with a binary reduction tree.
-                    int reps = store_ir.outer_repetitions;
+                    int reps = outer_repetitions;
                     while (reps % 2 == 0) {
                         int l = b.type().lanes() / 2;
                         Expr b0 = Shuffle::make_slice(b, 0, 1, l);

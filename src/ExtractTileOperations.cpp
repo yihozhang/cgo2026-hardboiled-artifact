@@ -1476,9 +1476,28 @@ class EnforceWMMALanes : public IRMutator {
             internal_error << "WMMA tile can only be indexed with ramp";
             return -1;
         }
-        int vec_length = ramp->lanes;
-        internal_assert(can_prove(ramp->base % vec_length == 0)) << "Cannot determine which WMMA tile to load from: " << ramp->base;
-        return ramp->base / vec_length;
+        if (ramp->base.type().is_scalar()) {
+            int vec_length = ramp->lanes;
+            internal_assert(can_prove(ramp->base % vec_length == 0)) << "Cannot determine which WMMA tile to load from: " << ramp->base;
+            return ramp->base / vec_length;
+        } else if (const Ramp *inner_ramp = ramp->base.as<Ramp>()) {
+            // It's a 2D tiling
+            int inner_lanes = inner_ramp->lanes;
+            int outer_lanes = ramp->lanes;
+            auto inner_stride = as_const_int(inner_ramp->stride);
+            auto outer_stride = as_const_int(ramp->stride);
+            internal_assert(inner_stride && *inner_stride == 1);
+            internal_assert(outer_stride);
+            Expr base = inner_ramp->base;
+            base /= inner_lanes;
+            int f = *outer_stride / inner_lanes;
+            return (base % f) + f * (base / (f * outer_lanes));
+            // TODO: Asserts on divisibility
+            // TODO: This assumes all accesses to this storage are tiled in the same way!
+        } else {
+            internal_error << "Cannot determine which WMMA tile to load from: " << e << "\n";
+            return Expr{};
+        }
     }
 
 protected:
