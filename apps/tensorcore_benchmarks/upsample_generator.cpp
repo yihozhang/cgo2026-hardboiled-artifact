@@ -139,32 +139,27 @@ public:
             RVar rkxo("rkxo"), rkxi("rkxi");
             RVar rkyo("rkyo"), rkyi("rkyi");
 
-            output.split(y, by, mmy, 2 * blockTileY)
+            output.split(y, by, mmy, 4 * blockTileY)
                 .split(x, bx, mmx, 2 * blockTileX)
                 .gpu_blocks(bx, by)
-                .gpu_threads(mmx, mmy)
+                .gpu_threads(mmx)
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 2)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .unroll(mmxi)
                 .unroll(mmyi);
-            /*
-                .split(mmy, mmy, mmyi, 2 * wmmaTileY)
-                .split(mmx, mmx, mmxi, 2 * wmmaTileX)
-                .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                .unroll(mmxi, 2)
-                .unroll(mmyi, 2)
-                .vectorize(mmxi)
-                .vectorize(mmyi);
-            */
 
             conv
                 .in()
                 .compute_at(output, bx)
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
-                .reorder({dx, dy, mmxi, mmyi, mmx, mmy})
+                .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
+                //.vectorize(dx)
+                //.vectorize(dy)
                 .unroll(dx)
                 .unroll(dy)
+                .unroll(mmx)
+                .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
 
@@ -175,14 +170,18 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .unroll(dx)
-                .unroll(dy);
+                .unroll(dy)
+                .unroll(mmx)
+                .unroll(mmy);
+            //.vectorize(dx)
+            //.vectorize(dy);
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
-                .reorder({dx, dy, rkxi, mmxi, mmyi, rkyi, rkxo, rkyo, mmx, mmy})
+                .reorder({rkxi, mmxi, mmyi, mmy, dx, dy, rkyi, rkxo, rkyo, mmx})
                 .atomic()
                 .vectorize(mmxi)
                 .vectorize(mmyi)
@@ -191,7 +190,9 @@ public:
                 .unroll(rkxo)
                 .unroll(rkyo)
                 .unroll(dx)
-                .unroll(dy);  // TODO: vectorize dx and dy and have a smaller kernel?
+                .unroll(dy)
+                .unroll(mmx)
+                .unroll(mmy);
         }
     }
 
