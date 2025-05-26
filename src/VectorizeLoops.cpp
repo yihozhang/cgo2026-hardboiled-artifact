@@ -1278,7 +1278,13 @@ class VectorSubs : public IRMutator {
                 store_index = mr.base;
 
                 for (size_t i = 0; i < mr.terms.size(); i++) {
-                    if (mr.terms[i].stride != 0) {
+                    bool first_or_last = i == 0 || i == mr.terms.size() - 1;
+                    if (mr.terms[i].stride == 0 && first_or_last) {
+                        continue;
+                    }
+                    if (mr.terms[i].stride == 0) {
+                        store_index = Broadcast::make(store_index, mr.terms[i].lanes);
+                    } else {
                         store_index = Ramp::make(store_index,
                                                  make_const(store_index.type(), mr.terms[i].stride),
                                                  mr.terms[i].lanes);
@@ -1286,7 +1292,9 @@ class VectorSubs : public IRMutator {
                 }
 
                 internal_assert(store_index.type().lanes() == output_lanes)
-                    << store_index << " " << output_lanes << "\n";
+                    << inner_repetitions << " " << outer_repetitions << " "
+                    << vector_scope.get(load_index.as<Variable>()->name) << " "
+                    << store_index << " " << mr.base.type().lanes() << " " << output_lanes << "\n";
 
                 if (inner_repetitions > 1) {
                     b = VectorReduce::make(reduce_op, b, output_lanes * outer_repetitions);

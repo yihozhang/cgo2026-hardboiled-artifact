@@ -953,9 +953,9 @@ struct InsertPendingDefinition : public EqSatIRMutator {
         return program;
     }
 
-    Stmt insert (Stmt body) {
+    Stmt insert(Stmt body) {
         PrologueStmt pd = this->_pd.value();
-        
+
         const int lanes = pd.type().lanes();
         Stmt store_stmt;
 
@@ -1006,14 +1006,13 @@ struct InsertPendingDefinition : public EqSatIRMutator {
         PrologueStmt pd = this->_pd.value();
 
         if (std::any_of(pd.free_vars.begin(), pd.free_vars.end(),
-                            [&write_vars](const std::string& var) {
-                                return write_vars.find(var) != write_vars.end();
-                            })) {
-                return true;
-            }
-            else {
-                return false;
-            }
+                        [&write_vars](const std::string &var) {
+                            return write_vars.find(var) != write_vars.end();
+                        })) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     Stmt visit(const For *op) override {
@@ -1024,7 +1023,6 @@ struct InsertPendingDefinition : public EqSatIRMutator {
         } else {
             return EqSatIRMutator::visit(op);
         }
-        
     }
 
     Stmt visit(const LetStmt *op) override {
@@ -1036,7 +1034,7 @@ struct InsertPendingDefinition : public EqSatIRMutator {
             return EqSatIRMutator::visit(op);
         }
     }
-    
+
     Stmt visit(const Allocate *op) override {
         if (op->node_type == type && op->name == name && !free_vars_are_modified(op->body)) {
             Stmt body = insert(op->body);
@@ -1071,14 +1069,16 @@ struct SubstStores : public EqSatIRMutator {
 
     const std::map<std::string, Stmt> &stores;
     std::set<std::string> avail_vars;
-    
+
     std::vector<PrologueStmt> pending_definitions;
-    
+
     std::deque<std::pair<IRNodeType, std::string>> trace;
 
     Stmt program;
 
-    SubstStores(Stmt program, std::map<std::string, Stmt> &&stores) : stores(stores), program(program) { }
+    SubstStores(Stmt program, std::map<std::string, Stmt> &&stores)
+        : stores(stores), program(program) {
+    }
 
     Stmt get_mutated_program() {
         Stmt out = this->mutate(program);
@@ -1086,7 +1086,7 @@ struct SubstStores : public EqSatIRMutator {
 
         auto pd_it = pending_definitions.begin();
         while (pd_it != pending_definitions.end()) {
-            auto& pending_definition = *pd_it;
+            auto &pending_definition = *pd_it;
 
             std::set<std::string> vars_in_scope;
             for (auto it = pending_definition.trace.rbegin(); it != pending_definition.trace.rend(); ++it) {
@@ -1098,7 +1098,7 @@ struct SubstStores : public EqSatIRMutator {
 
                 // If all needed variables are in scope, we can try to insert the pending definition.
                 if (std::includes(vars_in_scope.begin(), vars_in_scope.end(), pending_definition.free_vars.begin(), pending_definition.free_vars.end())) {
-                    
+
                     // Before we insert, we need to check if the variable/buffer we are reading is modified down the line
                     bool inserted = ipd.attempt_insert(t, name, pending_definition);
                     if (inserted) {
@@ -1108,7 +1108,7 @@ struct SubstStores : public EqSatIRMutator {
                 }
             }
         }
-        
+
         return ipd.get_program();
     }
 
@@ -1125,6 +1125,16 @@ struct SubstStores : public EqSatIRMutator {
                 // And if a pending_definition is also a ConvolutionShuffle
                 for (size_t idx = 0; idx < pending_definitions.size(); ++idx) {
                     auto &pending_definition = pending_definitions[idx];
+
+                    // It may be exactly equal to a pending definition
+                    if (equal(pending_definition.expr, prologue.expr)) {
+                        SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, 0);
+                        s = subst_kernel_loads.mutate(s);
+                        merged = true;
+                        break;
+                    }
+
+                    // Or it may be contiguous with an existing definition
                     const Call *existing_call = pending_definition.expr.as<Call>();
                     if (existing_call && existing_call->name == "ConvolutionShuffle") {
                         // Check if they can be merged
@@ -1134,6 +1144,8 @@ struct SubstStores : public EqSatIRMutator {
                         can_merge = can_merge && equal(new_call->args[0], existing_call->args[0]);
                         can_merge = can_merge && equal(new_call->args[2], existing_call->args[2]);
                         can_merge = can_merge && equal(new_call->args[4], existing_call->args[4]);
+
+                        debug(0) << "Considering merge of " << pending_definition.expr << " and " << prologue.expr << "\n";
 
                         // Read contiguous chunks
                         Expr base1 = existing_call->args[1];
@@ -1247,7 +1259,7 @@ struct SubstStores : public EqSatIRMutator {
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-        
+
         trace.pop_front();
 
         return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
@@ -1300,7 +1312,7 @@ struct SubstStores : public EqSatIRMutator {
 
         auto prologues = merge_convolution_shuffles(remover.get_prologues(), s);
 
-        for (auto& prologue : prologues) {
+        for (auto &prologue : prologues) {
             prologue.trace = trace;
         }
 
@@ -1659,7 +1671,7 @@ protected:
             int out_matrix_rows = (pixels + taps);
 
             // todo(maaz): We currently only handle cases where lanes are divisible by mat_cnt
-            internal_assert(32 % mat_cnt == 0);
+            internal_assert(32 % mat_cnt == 0) << mat_cnt << "\n";
 
             int rows_per_lane = (out_matrix_rows * mat_cnt) / 32;
             int wlanes_per_mat = 32 / mat_cnt;
