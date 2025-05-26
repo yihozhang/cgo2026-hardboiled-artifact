@@ -801,6 +801,7 @@ public:
         std::string name;
         Expr expr;
         std::set<string> free_vars;
+        std::deque<std::pair<IRNodeType, std::string>> trace;
 
         PrologueStmt(std::string name, Expr expr) {
             this->name = std::move(name);
@@ -827,6 +828,7 @@ public:
             }
         }
     };
+
     explicit RemoveGLoadsAndGVars(const std::string &prefix)
         : prefix(prefix) {
     }
@@ -911,16 +913,203 @@ struct SubstKernelLoads : public EqSatIRMutator {
     Expr offset;
 };
 
+struct ExtractWriteVars : public EqSatIRVisitor {
+    using EqSatIRVisitor::visit;
+
+    ExtractWriteVars(Stmt body) {
+        body.accept(this);
+    }
+
+    void visit(const Store *op) override {
+        write_vars.insert(op->name);
+    }
+
+    std::set<std::string> get_write_vars() {
+        return write_vars;
+    }
+
+private:
+    std::set<std::string> write_vars;
+};
+
+struct InsertPendingDefinition : public EqSatIRMutator {
+    using EqSatIRMutator::visit;
+    using PrologueStmt = RemoveGLoadsAndGVars::PrologueStmt;
+
+    InsertPendingDefinition(Stmt program) {
+        this->program = program;
+    }
+
+    bool attempt_insert(IRNodeType type, std::string name, PrologueStmt pending_definition) {
+        this->name = name;
+        this->type = type;
+        this->_pd = pending_definition;
+        this->inserted = false;
+        program = mutate(program);
+        return inserted;
+    }
+
+    Stmt get_program() {
+        return program;
+    }
+
+    Stmt insert (Stmt body) {
+        PrologueStmt pd = this->_pd.value();
+        
+        const int lanes = pd.type().lanes();
+        Stmt store_stmt;
+
+        const Call *call_stmt = pd.expr.as<Call>();
+        if (call_stmt && call_stmt->name.find("wmma.store.d") != string::npos) {
+            vector<Expr> args = call_stmt->args;
+            args[0] = Variable::make(Handle(), pd.name);
+            store_stmt = Evaluate::make(Call::make(call_stmt->type, call_stmt->name, args, call_stmt->call_type));
+            body = Block::make(store_stmt, body);
+            body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
+        } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
+            Expr dist_expr = Call::make(
+                call_stmt->type.with_lanes(lanes),
+                "DistributedConvolutionShuffle",
+                call_stmt->args,
+                call_stmt->call_type,
+                call_stmt->func,
+                call_stmt->value_index,
+                call_stmt->image,
+                call_stmt->param);
+            store_stmt = Store::make(pd.name, dist_expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
+            // store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
+
+            body = Block::make(store_stmt, body);
+
+            BufferBuilder builder;
+            builder.host = Variable::make(Handle(), pd.name);
+            builder.type = pd.type().with_lanes(1);
+            builder.dimensions = 1;
+            builder.mins.push_back(0);
+            builder.extents.push_back(lanes);
+            builder.strides.push_back(1);
+            body = LetStmt::make(pd.name + ".buffer", builder.build(), body);
+            body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
+        } else {
+            store_stmt = Store::make(pd.name, pd.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
+            body = Block::make(store_stmt, body);
+            body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
+        }
+
+        return body;
+    }
+
+    bool free_vars_are_modified(Stmt s) {
+        ExtractWriteVars ewv(s);
+        auto write_vars = ewv.get_write_vars();
+
+        PrologueStmt pd = this->_pd.value();
+
+        if (std::any_of(pd.free_vars.begin(), pd.free_vars.end(),
+                            [&write_vars](const std::string& var) {
+                                return write_vars.find(var) != write_vars.end();
+                            })) {
+                return true;
+            }
+            else {
+                return false;
+            }
+    }
+
+    Stmt visit(const For *op) override {
+        if (op->node_type == type && op->name == name && !free_vars_are_modified(op->body)) {
+            Stmt body = insert(op->body);
+            this->inserted = true;
+            return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
+        } else {
+            return EqSatIRMutator::visit(op);
+        }
+        
+    }
+
+    Stmt visit(const LetStmt *op) override {
+        if (op->node_type == type && op->name == name && !free_vars_are_modified(op->body)) {
+            Stmt body = insert(op->body);
+            this->inserted = true;
+            return LetStmt::make(op->name, op->value, body);
+        } else {
+            return EqSatIRMutator::visit(op);
+        }
+    }
+    
+    Stmt visit(const Allocate *op) override {
+        if (op->node_type == type && op->name == name && !free_vars_are_modified(op->body)) {
+            Stmt body = insert(op->body);
+            this->inserted = true;
+            return Allocate::make(op->name, op->type, op->memory_type, op->extents, op->condition, body);
+        } else {
+            return EqSatIRMutator::visit(op);
+        }
+    }
+
+    Stmt visit(const ProducerConsumer *op) override {
+        if (op->node_type == type && op->name == name && !free_vars_are_modified(op->body)) {
+            Stmt body = insert(op->body);
+            this->inserted = true;
+            return ProducerConsumer::make(op->name, op->is_producer, body);
+        } else {
+            return EqSatIRMutator::visit(op);
+        }
+    }
+
+private:
+    Stmt program;
+    std::string name;
+    IRNodeType type;
+    std::optional<PrologueStmt> _pd;
+    bool inserted;
+};
+
 struct SubstStores : public EqSatIRMutator {
     using EqSatIRMutator::visit;
+    using PrologueStmt = RemoveGLoadsAndGVars::PrologueStmt;
+
     const std::map<std::string, Stmt> &stores;
     std::set<std::string> avail_vars;
-    std::vector<RemoveGLoadsAndGVars::PrologueStmt> pending_definitions;
-    std::stack<bool> inside_gpu_kernel;
+    
+    std::vector<PrologueStmt> pending_definitions;
+    
+    std::deque<std::pair<IRNodeType, std::string>> trace;
 
-    SubstStores(std::map<std::string, Stmt> &&stores)
-        : stores(stores) {
-        inside_gpu_kernel.push(false);
+    Stmt program;
+
+    SubstStores(Stmt program, std::map<std::string, Stmt> &&stores) : stores(stores), program(program) { }
+
+    Stmt get_mutated_program() {
+        Stmt out = this->mutate(program);
+        InsertPendingDefinition ipd(out);
+
+        auto pd_it = pending_definitions.begin();
+        while (pd_it != pending_definitions.end()) {
+            auto& pending_definition = *pd_it;
+
+            std::set<std::string> vars_in_scope;
+            for (auto it = pending_definition.trace.rbegin(); it != pending_definition.trace.rend(); ++it) {
+                IRNodeType t = it->first;
+                std::string name = it->second;
+
+                // Add variables introduced by the statement into scope
+                vars_in_scope.insert(name);
+
+                // If all needed variables are in scope, we can try to insert the pending definition.
+                if (std::includes(vars_in_scope.begin(), vars_in_scope.end(), pending_definition.free_vars.begin(), pending_definition.free_vars.end())) {
+                    
+                    // Before we insert, we need to check if the variable/buffer we are reading is modified down the line
+                    bool inserted = ipd.attempt_insert(t, name, pending_definition);
+                    if (inserted) {
+                        pd_it = pending_definitions.erase(pd_it);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        return ipd.get_program();
     }
 
     auto merge_convolution_shuffles(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues, Stmt &s) {
@@ -1010,7 +1199,6 @@ struct SubstStores : public EqSatIRMutator {
                     vector<Expr> args = call_stmt->args;
                     args[0] = Variable::make(Handle(), prologue.name);
                     store_stmt = Evaluate::make(Call::make(call_stmt->type, call_stmt->name, args, call_stmt->call_type));
-                    std::cerr << store_stmt;
                     body = Block::make(store_stmt, body);
                     body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
                 } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
@@ -1053,31 +1241,49 @@ struct SubstStores : public EqSatIRMutator {
     }
 
     Stmt visit(const For *op) override {
-        inside_gpu_kernel.push(op->for_type == ForType::GPUBlock);
+        trace.push_front(std::make_pair(IRNodeType::For, op->name));
 
         const string name = op->name;
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
-
-        // if (op->for_type == ForType::GPULane) {
-        body = insert_pending_definitions(body);
-        //}
-
-        inside_gpu_kernel.pop();
+        
+        trace.pop_front();
 
         return For::make(op->name, op->min, op->extent, op->for_type, op->partition_policy, op->device_api, body);
     }
 
     Stmt visit(const LetStmt *op) override {
+        trace.push_front(std::make_pair(IRNodeType::LetStmt, op->name));
+
         string name = op->name;
         avail_vars.insert(name);
         Stmt body = mutate(op->body);
         avail_vars.erase(name);
 
-        body = insert_pending_definitions(body);
+        trace.pop_front();
 
         return LetStmt::make(op->name, mutate(op->value), body);
+    }
+
+    Stmt visit(const Allocate *op) override {
+        trace.push_front(std::make_pair(IRNodeType::Allocate, op->name));
+
+        string name = op->name;
+        avail_vars.insert(name);
+        Stmt body = mutate(op->body);
+        avail_vars.erase(name);
+
+        trace.pop_front();
+
+        return Allocate::make(op->name, op->type, op->memory_type, op->extents, op->condition, body, op->new_expr, op->free_function, op->padding);
+    }
+
+    Stmt visit(const ProducerConsumer *op) override {
+        trace.push_front(std::make_pair(IRNodeType::ProducerConsumer, op->name));
+        Stmt body = mutate(op->body);
+        trace.pop_front();
+        return ProducerConsumer::make(op->name, op->is_producer, body);
     }
 
     Stmt visit(const Store *op) override {
@@ -1094,10 +1300,36 @@ struct SubstStores : public EqSatIRMutator {
 
         auto prologues = merge_convolution_shuffles(remover.get_prologues(), s);
 
+        for (auto& prologue : prologues) {
+            prologue.trace = trace;
+        }
+
         pending_definitions.insert(pending_definitions.end(), prologues.begin(), prologues.end());
 
         return s;
     }
+
+    /*Stmt visit(const Block *op) override {
+        std::vector<RemoveGLoadsAndGVars::PrologueStmt> pending_definitions_copy = pending_definitions;
+
+        pending_definitions.clear();
+        Stmt new_first = mutate(op->first);
+
+        pending_definitions_copy.insert(pending_definitions_copy.end(), pending_definitions.begin(), pending_definitions.end());
+
+        pending_definitions.clear();
+        Stmt new_rest = mutate(op->rest);
+
+        pending_definitions_copy.insert(pending_definitions_copy.end(), pending_definitions.begin(), pending_definitions.end());
+
+        pending_definitions = pending_definitions_copy;
+
+        if (new_first.same_as(op->first) &&
+            new_rest.same_as(op->rest)) {
+            return op;
+        }
+        return Block::make(std::move(new_first), std::move(new_rest));
+    }*/
 };
 
 Type convert_to_tile_type(Type type) {
@@ -1601,10 +1833,10 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     }
 
     // post-processing
-    EqSatExtensions::SubstStores subst_stores(std::move(new_stores));
-    result = subst_stores.mutate(result);
+    EqSatExtensions::SubstStores subst_stores(result, std::move(new_stores));
+    result = subst_stores.get_mutated_program();
     for (auto pending_definition : subst_stores.pending_definitions) {
-        std::cout << "pending_definition: " << pending_definition.expr << std::endl;
+        std::cerr << "pending_definition: " << pending_definition.expr << std::endl;
     }
     internal_assert(subst_stores.pending_definitions.empty());
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
