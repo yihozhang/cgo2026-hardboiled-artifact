@@ -1197,61 +1197,6 @@ struct SubstStores : public EqSatIRMutator {
         return rem_prologues;
     }
 
-    Stmt insert_pending_definitions(Stmt body) {
-        auto it = pending_definitions.begin();
-        while (it != pending_definitions.end()) {
-            auto &prologue = *it;
-            // Find the first place where not every variable is available (or we are at the root of the GPU kernel)
-            if (!std::includes(avail_vars.begin(), avail_vars.end(), prologue.free_vars.begin(), prologue.free_vars.end())) {
-                const int lanes = prologue.type().lanes();
-                Stmt store_stmt;
-
-                const Call *call_stmt = prologue.expr.as<Call>();
-                if (call_stmt && call_stmt->name.find("wmma.store.d") != string::npos) {
-                    vector<Expr> args = call_stmt->args;
-                    args[0] = Variable::make(Handle(), prologue.name);
-                    store_stmt = Evaluate::make(Call::make(call_stmt->type, call_stmt->name, args, call_stmt->call_type));
-                    body = Block::make(store_stmt, body);
-                    body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
-                } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
-                    Expr dist_expr = Call::make(
-                        call_stmt->type.with_lanes(lanes),
-                        "DistributedConvolutionShuffle",
-                        call_stmt->args,
-                        call_stmt->call_type,
-                        call_stmt->func,
-                        call_stmt->value_index,
-                        call_stmt->image,
-                        call_stmt->param);
-                    store_stmt = Store::make(prologue.name, dist_expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
-                    // store_stmt = For::make("conv_shuffle.thread_id_x", 0, 32, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, store_stmt);
-
-                    body = Block::make(store_stmt, body);
-
-                    BufferBuilder builder;
-                    builder.host = Variable::make(Handle(), prologue.name);
-                    builder.type = prologue.type().with_lanes(1);
-                    builder.dimensions = 1;
-                    builder.mins.push_back(0);
-                    builder.extents.push_back(lanes);
-                    builder.strides.push_back(1);
-                    body = LetStmt::make(prologue.name + ".buffer", builder.build(), body);
-                    body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
-                } else {
-                    store_stmt = Store::make(prologue.name, prologue.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
-                    body = Block::make(store_stmt, body);
-                    body = Allocate::make(prologue.name, prologue.type().with_lanes(1), MemoryType::Auto, {prologue.type().lanes()}, const_true(prologue.type().lanes()), body);
-                }
-
-                it = pending_definitions.erase(it);
-            } else {
-                ++it;
-            }
-        }
-
-        return body;
-    }
-
     Stmt visit(const For *op) override {
         trace.push_front(std::make_pair(IRNodeType::For, op->name));
 
@@ -1320,28 +1265,6 @@ struct SubstStores : public EqSatIRMutator {
 
         return s;
     }
-
-    /*Stmt visit(const Block *op) override {
-        std::vector<RemoveGLoadsAndGVars::PrologueStmt> pending_definitions_copy = pending_definitions;
-
-        pending_definitions.clear();
-        Stmt new_first = mutate(op->first);
-
-        pending_definitions_copy.insert(pending_definitions_copy.end(), pending_definitions.begin(), pending_definitions.end());
-
-        pending_definitions.clear();
-        Stmt new_rest = mutate(op->rest);
-
-        pending_definitions_copy.insert(pending_definitions_copy.end(), pending_definitions.begin(), pending_definitions.end());
-
-        pending_definitions = pending_definitions_copy;
-
-        if (new_first.same_as(op->first) &&
-            new_rest.same_as(op->rest)) {
-            return op;
-        }
-        return Block::make(std::move(new_first), std::move(new_rest));
-    }*/
 };
 
 Type convert_to_tile_type(Type type) {
