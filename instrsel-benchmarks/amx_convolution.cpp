@@ -8,7 +8,7 @@
 
 using namespace Halide;
 
-bool conv1d(Halide::Target target) {
+bool conv1d(Halide::Target target, bool check_result) {
     (void)target;
 
     const int acc = 64;
@@ -72,8 +72,8 @@ bool conv1d(Halide::Target target) {
 
     // result.compile_to_lowered_stmt("/tmp/matmul_flat_1x1.html", {A, B}, HTML, target);
 
-    int row = 4096;
-    int col = 4096;
+    int row = 512;
+    int col = 512;
     Buffer<bfloat16_t> b_buf(col, row);
     fill_buffer_flat(b_buf, row / 2, col / 2);
     B.set(b_buf);
@@ -89,6 +89,23 @@ bool conv1d(Halide::Target target) {
         result.realize(out, target);
     });
 
+    if (check_result) {
+        // Check the result
+        for (int y = 0; y < row; y++) {
+            for (int x = 0; x < col - acc; x++) {
+                float expected = 0;
+                for (int i = 0; i < acc; i++) {
+                    expected += float(a_buf(i)) * float(b_buf(x + i, y));
+                }
+                if (out(x, y) != expected) {
+                    std::cerr << "Mismatch at (" << x << ", " << y << "): "
+                              << out(x, y) << " != " << expected << std::endl;
+                    return false;
+                }
+            }
+        }
+    }
+
     std::cout << "Time: " << time << " ms" << std::endl;
     std::cout << "Result: " << out(0, 0) << std::endl;
     return true;
@@ -99,6 +116,6 @@ int main(int argc, char **argv) {
     Target target("x86-64-linux-avx512_sapphirerapids");
 
     printf("Running AMX conv1d\n");
-    conv1d(target);
+    conv1d(target, true);
     return 0;
 }
