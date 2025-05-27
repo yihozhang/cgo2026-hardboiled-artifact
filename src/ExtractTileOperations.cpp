@@ -1500,7 +1500,49 @@ protected:
             }
             return Shuffle::make({vec}, indices);
 
-        } else if (call->name == "ConvolutionShuffle") {
+        } else if (call->name == "ConvolutionShuffle" || call->name == "VNNIConvolutionShuffleBF16") {
+            bool is_amx = call->name == "VNNIConvolutionShuffleBF16";
+            const std::vector<Expr> &args = call->args;
+            internal_assert(args.size() == 5);
+            const auto *var = args[0].as<Variable>();
+            auto base_r = args[1];
+            auto stride_r = args[2];
+            const auto l1_opt = as_const_int(args[3]);
+            const auto l2_opt = as_const_int(args[4]);
+            if (!(var && l1_opt.has_value() && l2_opt.has_value())) {
+                internal_error << "ConvolutionShuffle: arguments have unexpected type\n";
+                return Expr();
+            }
+            auto l1 = l1_opt.value();
+            auto l2 = l2_opt.value();
+            auto ty = is_amx ? BFloat(16, l1) : Float(16, l1);
+            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, l1), {}, {}, const_true(l1), {});
+            Expr vec2 = is_amx ? FloatImm::make(BFloat(16), 0) : FloatImm::make(Float(16), 0);
+            vector<int> indices;
+            for (int j = 0; j < l1 + l2; j++) {
+                for (int i = 0; i < l2; i++) {
+                    if (0 <= j - i && j - i < l1) {
+                        indices.push_back(j - i);
+                    } else {
+                        indices.push_back(l1);
+                    }
+                }
+            }
+            if (is_amx) {
+                vector<int> amx_indices;
+                int K = 2;
+                for (int i = 0; i < l1 + l2; i += K) {
+                    for (int j = 0; j < l2; j++) {
+                        for (int k = 0; k < K; k++) {
+                            amx_indices.push_back(indices[(i + k) * l2 + j]);
+                        }
+                    }
+                }
+                indices = amx_indices;
+            }
+            auto v = Shuffle::make({vec1, vec2}, indices);
+            return v;
+        } else if (false) {
             const std::vector<Expr> &args = call->args;
             internal_assert(args.size() == 5);
             const auto *var = args[0].as<Variable>();

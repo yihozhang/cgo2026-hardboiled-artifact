@@ -333,6 +333,77 @@
     (union e (AMX2Mem new-e))
 ) :ruleset amx)
 
+
+(rule (
+    (= e (Bop (Add)
+            (VectorReduce (Float 32 out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float 32 tot-lanes) lhs)
+                    (Cast (Float 32 tot-lanes) rhs))
+            )
+            mat))
+    (= lhs (Load (BFloat 16 tot-lanes) lhs-name lhs-index))
+    (= rhs (Load (BFloat 16 tot-lanes) rhs-name rhs-index))
+
+    (= lhs-index 
+        (Ramp 
+            (Ramp 
+                (Ramp bl s1a l1) 
+                (Broadcast s2 l1) 
+                l2) 
+            (Broadcast s3 (* l1 l2)) 
+            l3))
+    (= rhs-index 
+        (Broadcast 
+            (Broadcast (Ramp br s1b l1) l2) l3))
+
+    (= s2 s1a)
+    (= s1a (IntImm32 1))
+    (= lhs-inner-offset 1)
+) (
+    (let new-l1 (+ l1 (* lhs-inner-offset l2)))
+    (let new-tot-lanes (* (* new-l1 l2) l3))
+    (let new-lhs-index
+        (Ramp 
+            (Broadcast 
+                (Ramp bl s1a new-l1)
+                l2)
+            (Broadcast s3 (* new-l1 l2))
+            l3)
+    )
+    (let new-lhs (Load (BFloat 16 new-tot-lanes) lhs-name new-lhs-index))
+    
+    (let new-rhs-index 
+        (Broadcast 
+            (Ramp 
+                (Ramp (Ramp (IntImm32 0) (IntImm32 1) 2) 
+                      (Broadcast (IntImm32 (* l2 2)) 2)
+                      (/ new-l1 2))
+                (Broadcast (IntImm32 2) new-l1)
+                l2)
+            l3))
+    (let new-rhs-name
+        (ExprVar (Mem)
+            (Call "VNNIConvolutionShuffleBF16" (BFloat 16 (* new-l1 l2))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2)))
+        )
+    )
+    (let new-rhs (Load (BFloat 16 new-tot-lanes) new-rhs-name new-rhs-index))
+
+    (let new-e 
+        (Bop (Add)
+                (VectorReduce (Float 32 out-lanes) (Add)
+                    (Bop (Mul)
+                        (Cast (Float 32 new-tot-lanes) new-lhs)
+                        (Cast (Float 32 new-tot-lanes) new-rhs))
+                )
+                mat))
+
+    (union e new-e)
+) :ruleset amx)
+
+
+
 (birewrite (Cast ty (AMX2Mem e)) (AMX2Mem (Cast ty e)) :ruleset amx)
 (birewrite (Cast ty (Mem2AMX e)) (Mem2AMX (Cast ty e)) :ruleset amx)
 (birewrite (BroadcastPer p (Mem2AMX e) l) (Mem2AMX (BroadcastPer p e l)) :ruleset amx)
