@@ -1082,6 +1082,92 @@ struct SubstStores : public EqSatIRMutator {
 
     Stmt get_mutated_program() {
         Stmt out = this->mutate(program);
+        
+        // Delete duplicate pending definitions
+        std::vector<PrologueStmt> unique_pending_definitions;
+        for (size_t i = 0; i < pending_definitions.size(); i++) {
+            bool unique = true;
+            for (size_t j = 0; j < unique_pending_definitions.size(); j++) {
+                // If they are exactly equal, we can replace the first with the second
+                if (equal(pending_definitions[i].expr, unique_pending_definitions[j].expr)) {
+                    debug(0) << "Found equals: " << pending_definitions[i].name << " and " << unique_pending_definitions[j].name << "\n";
+                    SubstKernelLoads subst_kernel_loads(pending_definitions[i].name, unique_pending_definitions[j].name, 0);
+                    out = subst_kernel_loads.mutate(out);
+                    unique = false;
+                    break;
+                }
+            }
+            if (unique) {
+                unique_pending_definitions.push_back(pending_definitions[i]);
+            }
+        }
+
+        pending_definitions = unique_pending_definitions;
+
+        // Merge convolution shuffles till convergence
+        bool merge_happened = true;
+        while (merge_happened) {
+            merge_happened = false;
+
+            std::vector<PrologueStmt> merged_pending_definitions;
+            
+            for (size_t i = 0; i < pending_definitions.size(); i++) {
+                for (size_t j = 0; j < pending_definitions.size(); j++) {
+                    if (i == j) continue;  // Skip self-comparison
+
+                    // If they can be merged, merge them
+                    const Call* c0 = pending_definitions[i].expr.as<Call>();
+                    const Call* c1 = pending_definitions[j].expr.as<Call>();
+
+                    if (c0 && c1 && c0->name == c1->name && c0->name == "ConvolutionShuffle") {
+                        bool can_merge_0_1 = can_merge_shuffles(c0, c1);
+                        bool can_merge_1_0 = can_merge_shuffles(c1, c0);
+                        if (can_merge_0_1 || can_merge_1_0) {
+                            debug(0) << "Can merge " << pending_definitions[i].name << " and " << pending_definitions[j].name << "\n";
+                            // Add all pending definitions to merged_pending_definitions, except the one we are merging
+                            for (size_t k = 0; k < pending_definitions.size(); k++) {
+                                if (k != i && k != j) {
+                                    merged_pending_definitions.push_back(pending_definitions[k]);
+                                }
+                            }
+                            // Add the merged definition
+                            if (can_merge_0_1) {
+                                pending_definitions[i].expr = merge_shuffles(c0, c1);
+                                merged_pending_definitions.push_back(pending_definitions[i]);
+
+                                // Update loads
+                                int offset = c0->type.lanes();
+                                SubstKernelLoads subst_kernel_loads(pending_definitions[j].name, pending_definitions[i].name, offset);
+                                out = subst_kernel_loads.mutate(out);
+                            } else {
+                                pending_definitions[j].expr = merge_shuffles(c1, c0);
+                                merged_pending_definitions.push_back(pending_definitions[j]);
+
+                                // Update loads
+                                int offset = c1->type.lanes();
+                                SubstKernelLoads subst_kernel_loads(pending_definitions[i].name, pending_definitions[j].name, offset);
+                                out = subst_kernel_loads.mutate(out);
+                            }
+                            
+                            merge_happened = true;
+                            break;
+                        }
+                    }
+                }
+                if (merge_happened) break;
+            }
+
+            // If no merges happened, preserve the original definitions
+            if (merge_happened) {
+                pending_definitions = merged_pending_definitions;
+            }
+        };
+
+        debug(0) << "Pending definitions:\n" << pending_definitions.size() << "\n";
+        for (auto &pending_definition : pending_definitions) {
+            debug(0) << "Pending definition: " << pending_definition.name << " " << pending_definition.expr << "\n";
+        }
+
         InsertPendingDefinition ipd(out);
 
         auto pd_it = pending_definitions.begin();
@@ -1112,6 +1198,54 @@ struct SubstStores : public EqSatIRMutator {
         return ipd.get_program();
     }
 
+    bool can_merge_shuffles(const Call *new_call, const Call *existing_call) {
+        // Check if they can be merged
+        bool can_merge = true;
+
+        // Matching buffer, stride and tile size
+        can_merge = can_merge && equal(new_call->args[0], existing_call->args[0]);
+        can_merge = can_merge && equal(new_call->args[2], existing_call->args[2]);
+        can_merge = can_merge && equal(new_call->args[4], existing_call->args[4]);
+
+        // Read contiguous chunks
+        Expr base1 = existing_call->args[1];
+        Expr stride = existing_call->args[2];
+        Expr length1 = existing_call->args[3];
+        Expr base2 = new_call->args[1];
+        can_merge = can_merge && equal(simplify(base1 + length1 * stride), simplify(base2));
+
+        return can_merge;
+    }
+
+    Expr merge_shuffles(const Call *new_call, const Call *existing_call) {
+        Expr base1 = existing_call->args[1];
+        Expr stride = existing_call->args[2];
+        Expr length1 = existing_call->args[3];
+
+        Expr buffer = existing_call->args[0];
+        Expr length2 = new_call->args[3];
+        Expr taps = simplify(length1 + length2);
+        Expr pixels = existing_call->args[4];
+
+        Expr tiles1 = (existing_call->args.size() > 5) ? existing_call->args[5] : make_one(Int(32));
+        Expr tiles2 = (new_call->args.size() > 5) ? new_call->args[5] : make_one(Int(32));
+        Expr tile_cnt = tiles1 + tiles2;
+
+        // Create the merged ConvolutionShuffle call
+        std::vector<Expr> merged_args = {buffer, base1, stride, taps, pixels, tile_cnt};
+        Expr merged_call = Call::make(
+            existing_call->type.with_lanes(existing_call->type.lanes() + new_call->type.lanes()),
+            "ConvolutionShuffle",
+            merged_args,
+            existing_call->call_type,
+            existing_call->func,
+            existing_call->value_index,
+            existing_call->image,
+            existing_call->param);
+
+        return simplify(merged_call);
+    }
+
     auto merge_convolution_shuffles(std::vector<RemoveGLoadsAndGVars::PrologueStmt> prologues, Stmt &s) {
         // If the prologue is a ConvolutionShuffle call, we can merge it with an existing pending_definition
         // if it reads from contiguous memory locations
@@ -1128,6 +1262,8 @@ struct SubstStores : public EqSatIRMutator {
 
                     // It may be exactly equal to a pending definition
                     if (equal(pending_definition.expr, prologue.expr)) {
+                        debug(0) << "Found equals: " << pending_definition.expr << " and " << prologue.expr << "\n";
+                        debug(0) << "Replacing " << prologue.name << " with " << pending_definition.name << "\n";
                         SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, 0);
                         s = subst_kernel_loads.mutate(s);
                         merged = true;
@@ -1137,52 +1273,13 @@ struct SubstStores : public EqSatIRMutator {
                     // Or it may be contiguous with an existing definition
                     const Call *existing_call = pending_definition.expr.as<Call>();
                     if (existing_call && existing_call->name == "ConvolutionShuffle") {
-                        // Check if they can be merged
-                        bool can_merge = true;
-
-                        // Matching buffer, stride and tile size
-                        can_merge = can_merge && equal(new_call->args[0], existing_call->args[0]);
-                        can_merge = can_merge && equal(new_call->args[2], existing_call->args[2]);
-                        can_merge = can_merge && equal(new_call->args[4], existing_call->args[4]);
-
-                        debug(0) << "Considering merge of " << pending_definition.expr << " and " << prologue.expr << "\n";
-
-                        // Read contiguous chunks
-                        Expr base1 = existing_call->args[1];
-                        Expr stride = existing_call->args[2];
-                        Expr length1 = existing_call->args[3];
-                        Expr base2 = new_call->args[1];
-                        can_merge = can_merge && equal(simplify(base1 + length1 * stride), simplify(base2));
-
-                        if (can_merge) {
-                            Expr buffer = existing_call->args[0];
-                            Expr length2 = new_call->args[3];
-                            Expr taps = simplify(length1 + length2);
-                            Expr pixels = existing_call->args[4];
-
-                            Expr tiles1 = (existing_call->args.size() > 5) ? existing_call->args[5] : make_one(Int(32));
-                            Expr tiles2 = (new_call->args.size() > 5) ? new_call->args[5] : make_one(Int(32));
-                            Expr tile_cnt = tiles1 + tiles2;
-
-                            // Create the merged ConvolutionShuffle call
-                            std::vector<Expr> merged_args = {buffer, base1, stride, taps, pixels, tile_cnt};
-                            Expr merged_call = Call::make(
-                                existing_call->type.with_lanes(existing_call->type.lanes() + new_call->type.lanes()),
-                                "ConvolutionShuffle",
-                                merged_args,
-                                existing_call->call_type,
-                                existing_call->func,
-                                existing_call->value_index,
-                                existing_call->image,
-                                existing_call->param);
+                        if (can_merge_shuffles(new_call, existing_call)) {
+                            pending_definition.expr = merge_shuffles(new_call, existing_call);
+                            debug(0) << "Merge result: " << pending_definition.expr << "\n";
 
                             int offset = existing_call->type.lanes();
-
-                            pending_definition.expr = simplify(merged_call);
-
                             SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, offset);
                             s = subst_kernel_loads.mutate(s);
-
                             merged = true;
                             break;
                         }
@@ -1255,7 +1352,8 @@ struct SubstStores : public EqSatIRMutator {
         RemoveGLoadsAndGVars remover(prefix);
         s = remover.mutate(s);
 
-        auto prologues = merge_convolution_shuffles(remover.get_prologues(), s);
+        auto prologues = remover.get_prologues();
+        //prologues = merge_convolution_shuffles(prologues, s);
 
         for (auto &prologue : prologues) {
             prologue.trace = trace;
