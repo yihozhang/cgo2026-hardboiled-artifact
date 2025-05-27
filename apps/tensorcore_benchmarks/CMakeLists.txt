@@ -114,6 +114,17 @@ target_compile_definitions(matmul_cublas
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
+# Add command line argument handling
+if(CMAKE_ARGC GREATER 3)
+    set(MATMUL_M ${CMAKE_ARGV3} CACHE STRING "Rows of the input matrix A" FORCE)
+endif()
+if(CMAKE_ARGC GREATER 4)
+    set(MATMUL_N ${CMAKE_ARGV4} CACHE STRING "Columns of the input matrix B" FORCE)
+endif()
+if(CMAKE_ARGC GREATER 5)
+    set(MATMUL_K ${CMAKE_ARGV5} CACHE STRING "Columns of the input matrix A / Rows of the input matrix B" FORCE)
+endif()
+
 target_link_libraries(conv1d
     PRIVATE
     conv1d_lib
@@ -131,6 +142,7 @@ target_link_libraries(matmul
     matmul_lib
     Halide::Tools
 )
+
 target_link_libraries(matmul_cublas
     PRIVATE
     ${CUDA_LIBRARIES}

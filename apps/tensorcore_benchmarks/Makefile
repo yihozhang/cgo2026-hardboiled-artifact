@@ -44,7 +44,7 @@ $(GENERATOR_BIN)/upsample.generator: upsample_generator.cpp $(GENERATOR_DEPS)
 .PRECIOUS: $(BIN)/%/upsample.a
 $(BIN)/%/upsample.a: $(GENERATOR_BIN)/upsample.generator
 	@mkdir -p $(@D)
-	$^ -g upsample -e $(GENERATOR_OUTPUTS),conceptual_stmt -o $(@D) -f upsample target=$(HL_TARGET) gpu_schedule=$* kSize=$(KERNEL_SIZE)
+	$^ -g upsample -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f upsample target=$(HL_TARGET) gpu_schedule=$* kSize=$(KERNEL_SIZE)
 
 $(BIN)/%/upsample: process.cpp $(BIN)/%/upsample.a 
 	@mkdir -p $(@D)
