@@ -35,7 +35,9 @@ Expr Simplify::visit(const Sub *op, ExprInfo *info) {
              rewrite(x - x, 0) || // We want to remutate this just to get better bounds
              rewrite(ramp(x, y, c0) - ramp(z, w, c0), ramp(x - z, y - w, c0)) ||
              rewrite(ramp(x, y, c0) - broadcast(z, c0), ramp(x - z, y, c0)) ||
+             rewrite(ramp(x, y, c0) - broadcast(z, c1), ramp(x - broadcast(z, fold(c1/c0)), y, c0), c1 % c0 == 0) ||
              rewrite(broadcast(x, c0) - ramp(z, w, c0), ramp(x - z, -w, c0)) ||
+             rewrite(broadcast(z, c1) - ramp(x, y, c0), ramp(broadcast(z, fold(c1/c0)) - x, y, c0), c1 % c0 == 0) ||
              rewrite(broadcast(x, c0) - broadcast(y, c0), broadcast(x - y, c0)) ||
              rewrite(broadcast(x, c0) - broadcast(y, c1), broadcast(x - broadcast(y, fold(c1/c0)), c0), c1 % c0 == 0) ||
              rewrite(broadcast(y, c1) - broadcast(x, c0), broadcast(broadcast(y, fold(c1/c0)) - x, c0), c1 % c0 == 0) ||

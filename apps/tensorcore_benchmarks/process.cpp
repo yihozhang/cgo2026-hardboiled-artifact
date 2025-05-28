@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-#elif defined(RUN_conv2d) || defined(RUN_upsample)
+#elif defined(RUN_conv2d) || defined(RUN_upsample) || defined(RUN_downsample)
     // Create test data using compile-time definitions
     const int kSize = KERNEL_SIZE;
     const int imgW = IMG_COL;
@@ -181,13 +181,14 @@ int main(int argc, char **argv) {
     image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
     kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
-    // Create output buffer. Note that for upsampling we'll only use the
-    // top-left of the input given this output size.
-    Buffer<float> output(imgW - kSize, imgH - kSize);
-
 #if defined(RUN_conv2d)
+    Buffer<float> output(imgW - kSize, imgH - kSize);
 #define fn conv2d
+#elif defined(RUN_downsample)
+    Buffer<float> output((imgW - kSize) / 2, (imgH - kSize) / 2);
+#define fn downsample
 #else
+    Buffer<float> output(2 * (imgW - kSize), 2 * (imgH - kSize));
 #define fn upsample
 #endif
 

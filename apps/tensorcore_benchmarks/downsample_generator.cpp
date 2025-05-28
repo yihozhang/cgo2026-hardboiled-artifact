@@ -5,7 +5,7 @@
 
 using namespace Halide;
 
-class Upsample : public Halide::Generator<Upsample> {
+class Downsample : public Halide::Generator<Downsample> {
 public:
     // Generator Params
     GeneratorParam<Schedule> gpu_schedule{
@@ -27,34 +27,21 @@ public:
     Output<Buffer<float>> output{"output", 2};
 
     void generate() {
-        Var x{"x"}, y{"y"}, dx{"dx"}, dy{"dy"};
+        Var x{"x"}, y{"y"};
 
-        RDom rk(0, kSize / 2, 0, kSize / 2, "rk");
+        // A downsample is just a strided conv. This is interestingly different
+        // to a conv because the stride makes the indexing not line up in the
+        // same way.
 
-        // Possibly the cleanest way to treat upsampling in signal processing
-        // terms is as interleaving the outputs of a multi-phase filter. We're
-        // going to assume the kernel is non-separable (e.g. a Bessel function,
-        // which is optimal in some sense).
-
-        // First rearrange the kernel as appropriate to extract each phase
-        Func kernel_phases{"kernel_phases"};
-        kernel_phases(x, y, dx, dy) = kernel(2 * x + dx, 2 * y + dy);
+        RDom rk(0, kSize, 0, kSize, "rk");
 
         Func conv{"conv"};
-        conv(x, y, dx, dy) = cast<float>(0);
-        conv(x, y, dx, dy) +=
-            cast<float>(kernel_phases(rk.x, rk.y, dx, dy)) *
-            cast<float>(image(x + rk.x, y + rk.y));
+        conv(x, y) = cast<float>(0);
+        conv(x, y) +=
+            cast<float>(kernel(rk.x, rk.y)) *
+            cast<float>(image(2 * x + rk.x, 2 * y + rk.y));
 
-        output(x, y) = conv(x / 2, y / 2, x % 2, y % 2);
-
-        // TODO: Important to clarify how this is different from the conv example
-
-        kernel_phases.compute_root();
-
-        // The output starts at zero and is even-sized
-        output.dim(0).set_bounds(0, (output.dim(0).extent() / 2) * 2);
-        output.dim(1).set_bounds(0, (output.dim(1).extent() / 2) * 2);
+        output(x, y) = conv(x, y);
 
         if (gpu_schedule == Schedule::CUDA) {
             /*---------------------------------*
@@ -95,11 +82,9 @@ public:
             conv.compute_at(output, tx)
                 .split(y, ty, tyi, threadTileY)
                 .split(x, tx, txi, threadTileX)
-                .reorder({dx, dy, txi, tyi, tx, ty})
+                .reorder({txi, tyi, tx, ty})
                 .vectorize(txi)
-                .unroll(tyi)
-                .unroll(dx)
-                .unroll(dy);
+                .unroll(tyi);
 
             /*------------------------------------------------------------------*
             |  3.  Schedule the reduction of conv                              |
@@ -109,27 +94,25 @@ public:
                 .split(x, tx, txi, threadTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
-                .reorder({dx, dy, rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})
+                .reorder({rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})
                 .unroll(rkxi)
                 .unroll(rkyi)
-                .unroll(dx)
-                .unroll(dy)
                 .vectorize(txi)
                 .unroll(tyi);
         } else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 32;
+            const int blockTileX = 256;
             const int blockTileY = 1;
 
             // We compute 256 contiguous elements
             // as a 32x8 matrix
-            const int wmmaTileX = 32;
+            const int wmmaTileX = 256;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = 4;  // kSize / 2;
-            const int reductionTileY = 4;  // 1;
+            const int reductionTileX = kSize;
+            const int reductionTileY = 1;
 
             /*---------------------------------*
             |  Vars / RVars                   |
@@ -139,27 +122,21 @@ public:
             RVar rkxo("rkxo"), rkxi("rkxi");
             RVar rkyo("rkyo"), rkyi("rkyi");
 
-            output.split(y, by, mmy, 16 * blockTileY)
-                .split(x, bx, mmx, 2 * blockTileX)
+            output.split(y, by, mmy, blockTileY)
+                .split(x, bx, mmx, blockTileX)
                 .gpu_blocks(bx, by)
                 .gpu_threads(mmx)
-                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 2)
+                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 1)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .unroll(mmxi)
                 .unroll(mmyi);
-
-            // Func conv_one_row = conv.update().rfactor({rk.y, u});
 
             conv
                 .in()
                 .compute_at(output, bx)
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
-                .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
-                //.vectorize(dx)
-                //.vectorize(dy)
-                .unroll(dx)
-                .unroll(dy)
+                .reorder({mmxi, mmyi, mmx, mmy})
                 .unroll(mmx)
                 .unroll(mmy)
                 .vectorize(mmxi)
@@ -171,29 +148,23 @@ public:
                 .split(x, mmx, mmxi, wmmaTileX)
                 .vectorize(mmxi)
                 .vectorize(mmyi)
-                .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
-                .unroll(dx)
-                .unroll(dy)
+                .reorder({mmxi, mmyi, mmx, mmy})
                 .unroll(mmx)
                 .unroll(mmy);
-            //.vectorize(dx)
-            //.vectorize(dy);
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
-                .reorder({rkxi, mmxi, rkyi, mmyi, dx, dy, mmy, rkxo, rkyo, mmx})
+                .reorder({rkxi, mmxi, mmyi, rkyi, mmy, rkxo, rkyo, mmx})
                 .atomic()
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
-                .vectorize(rkyi)
+                .unroll(rkyi)
                 .unroll(rkxo)
                 .unroll(rkyo)
-                .vectorize(dx)
-                .vectorize(dy)
                 .unroll(mmx)
                 .unroll(mmy);
         }
@@ -202,4 +173,4 @@ public:
 private:
 };
 
-HALIDE_REGISTER_GENERATOR(Upsample, upsample)
+HALIDE_REGISTER_GENERATOR(Downsample, downsample)
