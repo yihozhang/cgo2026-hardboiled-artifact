@@ -128,8 +128,8 @@ public:
             const int wmmaTileX = 32;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = 4;  // kSize / 2;
-            const int reductionTileY = 4;  // 1;
+            const int reductionTileX = kSize / 2;
+            const int reductionTileY = 1;
 
             /*---------------------------------*
             |  Vars / RVars                   |
@@ -156,14 +156,16 @@ public:
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
                 .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
-                //.vectorize(dx)
-                //.vectorize(dy)
+                .vectorize(dx)
+                .vectorize(dy)
                 .unroll(dx)
                 .unroll(dy)
                 .unroll(mmx)
                 .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
+
+            conv.reorder_storage(x, dx, dy, y);
 
             conv.compute_at(output, bx)
                 .store_in(MemoryType::WMMAAccumulator)
@@ -175,9 +177,9 @@ public:
                 .unroll(dx)
                 .unroll(dy)
                 .unroll(mmx)
-                .unroll(mmy);
-            //.vectorize(dx)
-            //.vectorize(dy);
+                .unroll(mmy)
+                .vectorize(dx)
+                .vectorize(dy);
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
