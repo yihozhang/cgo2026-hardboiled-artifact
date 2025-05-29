@@ -182,15 +182,19 @@ int main(int argc, char **argv) {
     kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
 #if defined(RUN_conv2d)
-    Buffer<float> output(imgW - kSize, imgH - kSize);
+#define outW (imgW - kSize)
+#define outH (imgH - kSize)
 #define fn conv2d
 #elif defined(RUN_downsample)
-    Buffer<float> output((imgW - kSize) / 2, (imgH - kSize) / 2);
+#define outW ((imgW - kSize) / 2)
+#define outH ((imgH - kSize) / 2)
 #define fn downsample
 #else
-    Buffer<float> output(2 * (imgW - kSize), 2 * (imgH - kSize));
+#define outW (2 * (imgW - kSize))
+#define outH (2 * (imgH - kSize))
 #define fn upsample
 #endif
+    Buffer<float> output(outW, outH);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
@@ -209,18 +213,24 @@ int main(int argc, char **argv) {
     // Verify results
     if (VERIFY_OUTPUT) {
         bool success = true;
-        for (int y = 0; y < imgH - kSize; y++) {
+        for (int y = 0; y < outH; y++) {
             if (!success) {
                 break;
             }
-            for (int x = 0; x < imgW - kSize; x++) {
+            for (int x = 0; x < outW; x++) {
                 if (!success) {
                     break;
                 }
                 float expected = 0.0f;
                 for (int ky = 0; ky < kSize; ky++) {
                     for (int kx = 0; kx < kSize; kx++) {
+#if defined(RUN_conv2d)
                         expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
+#elif defined(RUN_downsample)
+                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(2 * x + kx, 2 * y + ky));
+#else
+                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x / 2 + kx, y / 2 + ky));
+#endif
                     }
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {

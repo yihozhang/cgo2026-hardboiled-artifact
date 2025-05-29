@@ -966,7 +966,8 @@ struct InsertPendingDefinition : public EqSatIRMutator {
             store_stmt = Evaluate::make(Call::make(call_stmt->type, call_stmt->name, args, call_stmt->call_type));
             body = Block::make(store_stmt, body);
             body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
-        } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6) {
+        } else if (call_stmt && call_stmt->name == "ConvolutionShuffle" && call_stmt->args.size() == 6 && false) {
+            // yz: I disabled this
             Expr dist_expr = Call::make(
                 call_stmt->type.with_lanes(lanes),
                 "DistributedConvolutionShuffle",
@@ -1767,26 +1768,31 @@ protected:
 
         } else if (call->name == "ConvolutionShuffle") {
             const std::vector<Expr> &args = call->args;
-            internal_assert(args.size() == 5);
+            internal_assert(args.size() == 7);
             const auto *var = args[0].as<Variable>();
             auto base_r = args[1];
             auto stride_r = args[2];
             const auto l1_opt = as_const_int(args[3]);
             const auto l2_opt = as_const_int(args[4]);
-            if (!(var && l1_opt.has_value() && l2_opt.has_value())) {
+            const auto steps_opt = as_const_int(args[5]);
+            const auto offset_opt = as_const_int(args[6]);
+            if (!(var && l1_opt.has_value() && l2_opt.has_value() && offset_opt.has_value() && steps_opt.has_value())) {
                 internal_error << "ConvolutionShuffle: arguments have unexpected type\n";
                 return Expr();
             }
             auto l1 = l1_opt.value();
             auto l2 = l2_opt.value();
+            auto offset = offset_opt.value();
+            auto steps = steps_opt.value();
             auto ty = Float(16, l1);
             Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, l1), {}, {}, const_true(l1), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
-            for (int j = 0; j < l1 + l2; j++) {
+            for (int j = 0; j < (l1 / steps) + l2; j++) {
                 for (int i = 0; i < l2; i++) {
-                    if (0 <= j - i && j - i < l1) {
-                        indices.push_back(j - i);
+                    int idx_into_filter = j + offset - i * steps;
+                    if (0 <= idx_into_filter && idx_into_filter < l1) {
+                        indices.push_back(idx_into_filter);
                     } else {
                         indices.push_back(l1);
                     }

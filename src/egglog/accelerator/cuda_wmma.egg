@@ -314,7 +314,7 @@
     (let new-rhs-name
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2) (IntImm32 1) (IntImm32 0)))
         )
     )
     (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
@@ -381,7 +381,7 @@
     (let new-rhs-name
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 new-l2)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 new-l2) (IntImm32 1) (IntImm32 0)))
         )
     )
     (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
@@ -394,6 +394,100 @@
                         (Cast (Float 32 new-tot-lanes) new-rhs))
                 )
                 mat))
+
+    (union e new-e)
+))
+
+
+;; Upsampling
+(rule (
+    (= e (Bop (Add)
+            (VectorReduce (Float 32 out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float 32 tot-lanes) lhs)
+                    (Cast (Float 32 tot-lanes) rhs))
+            )
+            mat))
+    (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+
+    (= lhs-index 
+        (Ramp 
+            (Ramp bl s1a l1)
+            (Broadcast s2 l1) 
+            l2))
+    (= rhs-index 
+        (Broadcast (Ramp br s1b l1) l2))
+
+    (= s2 (IntImm32 2))
+    (= s1a (IntImm32 1))
+    (= lhs-inner-offset 1)
+    (= l1 16)
+    (= l2 256)
+) (
+    (let new-l2 8)
+    (let new-l3 32)
+    (let new-l1 16)
+    (let new-tot-lanes (* (* new-l1 new-l2) new-l3))
+
+    ; the rhs index is invariant to both exprs
+    (let new-rhs-index
+        (Broadcast 
+            (Ramp 
+                (Ramp (IntImm32 0) (IntImm32 new-l2) new-l1)
+                (Broadcast (IntImm32 1) new-l1)
+                new-l2)
+            new-l3)
+    )
+
+    (let new-lhs-index-1
+        (Ramp 
+            (Broadcast 
+                (Ramp bl s1a new-l1)
+                new-l2)
+            (Broadcast (IntImm32 new-l1) (* new-l1 new-l2))
+            new-l3)
+    )
+    (let new-lhs-index-2
+        (Ramp 
+            (Broadcast 
+                (Ramp (Bop (Add) bl (IntImm32 new-l1)) s1a new-l1)
+                new-l2)
+            (Broadcast (IntImm32 new-l1) (* new-l1 new-l2))
+            new-l3)
+    )
+    (let new-lhs-1 (Load (Float 16 new-tot-lanes) lhs-name new-lhs-index-1))
+    (let new-lhs-2 (Load (Float 16 new-tot-lanes) lhs-name new-lhs-index-2))
+    
+    (let new-rhs-name-1
+        (ExprVar (Mem)
+            (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 0)))
+        )
+    )
+    (let new-rhs-name-2
+        (ExprVar (Mem)
+            (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 16)))
+        )
+    )
+    (let new-rhs-1 (Load (Float 16 new-tot-lanes) new-rhs-name-1 new-rhs-index))
+    (let new-rhs-2 (Load (Float 16 new-tot-lanes) new-rhs-name-2 new-rhs-index))
+
+    (let new-e-1
+        (VectorReduce (Float 32 out-lanes) (Add)
+            (Bop (Mul)
+                (Cast (Float 32 new-tot-lanes) new-lhs-1)
+                (Cast (Float 32 new-tot-lanes) new-rhs-1))
+        ))
+    (let new-e-2
+        (VectorReduce (Float 32 out-lanes) (Add)
+            (Bop (Mul)
+                (Cast (Float 32 new-tot-lanes) new-lhs-2)
+                (Cast (Float 32 new-tot-lanes) new-rhs-2))
+        ))
+    
+    (let new-e (Bop (Add) new-e-1 (Bop (Add) new-e-2 mat)))
 
     (union e new-e)
 ))
