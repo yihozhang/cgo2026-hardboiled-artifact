@@ -67,6 +67,19 @@ class CountGPUBlocksThreads : public IRVisitor {
         nt -= dt;
     }
 
+    void visit(const Realize *op) override {
+        // A gpu_lanes may appear if we're using wmma instructions
+        int dl = op->memory_type == MemoryType::WMMAAccumulator;
+
+        nl += dl;
+        nt += dl;
+        nthreads = std::max(nt, nthreads);
+        nlanes = std::max(nl, nlanes);
+        IRVisitor::visit(op);
+        nl -= dl;
+        nt -= dl;
+    }
+
 public:
     // The maximum values hit by the counters above, which tells us the nesting
     // depth of each type of loop within a Stmt.

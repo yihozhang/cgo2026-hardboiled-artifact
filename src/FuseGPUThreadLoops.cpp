@@ -925,7 +925,7 @@ public:
                             {"wmma.load.b.sync.aligned.row.m16n16k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m16n16k16.f32", {0, 1}},
                             {"wmma.store.d.sync.aligned.row.m16n16k16.f32", {0, 2}},
-                            
+
                             {"wmma.load.a.sync.aligned.row.m32n8k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m32n8k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m32n8k16.f32", {0, 2}},
@@ -1188,10 +1188,14 @@ class ExtractRegisterAllocations : public IRMutator {
         user_assert(op->memory_type == MemoryType::Stack ||
                     op->memory_type == MemoryType::Register ||
                     op->memory_type == MemoryType::Heap ||
+                    op->memory_type == MemoryType::WMMAAccumulator ||
+                    op->memory_type == MemoryType::WMMAA ||
+                    op->memory_type == MemoryType::WMMAB ||
                     op->memory_type == MemoryType::Auto)
             << "Allocation " << op->name << " is scheduled inside a loop over GPU threads, so "
             << "it must live in stack memory, heap memory, or registers. "
-            << "Shared allocations at this loop level are not yet supported.\n";
+            << "Shared allocations at this loop level are not yet supported.\n"
+            << op->memory_type << "\n";
 
         ScopedBinding<int> p(register_allocations, op->name, 0);
 
