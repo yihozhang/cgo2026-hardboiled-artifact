@@ -111,7 +111,7 @@ public:
             const int wmmaTileX = 256;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = kSize;
+            const int reductionTileX = 16;
             const int reductionTileY = 1;
 
             /*---------------------------------*
@@ -129,7 +129,8 @@ public:
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 1)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .unroll(mmxi)
-                .unroll(mmyi);
+                .unroll(mmyi)
+                ;
 
             conv
                 .in()
@@ -140,7 +141,8 @@ public:
                 .unroll(mmx)
                 .unroll(mmy)
                 .vectorize(mmxi)
-                .vectorize(mmyi);
+                .vectorize(mmyi)
+                ;
 
             conv.compute_at(output, bx)
                 .store_in(MemoryType::WMMAAccumulator)
@@ -150,7 +152,8 @@ public:
                 .vectorize(mmyi)
                 .reorder({mmxi, mmyi, mmx, mmy})
                 .unroll(mmx)
-                .unroll(mmy);
+                .unroll(mmy)
+                ;
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
@@ -162,11 +165,13 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
-                .unroll(rkyi)
-                .unroll(rkxo)
-                .unroll(rkyo)
-                .unroll(mmx)
-                .unroll(mmy);
+                // TODO(yz): I cannot unroll them because of a bug in synchronizing data to GPU
+                // .unroll(rkyi)
+                // .unroll(rkxo)
+                // .unroll(rkyo)
+                // .unroll(mmx)
+                // .unroll(mmy)
+                ;
         }
     }
 
