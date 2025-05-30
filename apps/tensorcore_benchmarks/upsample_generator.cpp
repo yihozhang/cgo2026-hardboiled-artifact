@@ -143,9 +143,8 @@ public:
                 .gpu_threads(mmx)
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 2)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                // .unroll(mmxi)
-                // .unroll(mmyi)
-                ;
+                .unroll(mmxi)
+                .unroll(mmyi);
 
             // Func conv_one_row = conv.update().rfactor({rk.y, u});
 
@@ -157,8 +156,8 @@ public:
                 .reorder({dx, dy, mmxi, mmyi, mmx, mmy})
                 .vectorize(dx)
                 .vectorize(dy)
-                // .unroll(mmx)
-                // .unroll(mmy)
+                .unroll(mmx)
+                .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
 
@@ -172,10 +171,8 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .reorder({dx, dy, mmxi, mmyi, mmx, mmy})
-                // .unroll(dx)
-                // .unroll(dy)
-                // .unroll(mmx)
-                // .unroll(mmy)
+                .unroll(mmx)
+                .unroll(mmy)
                 .vectorize(dx)
                 .vectorize(dy);
 
@@ -190,13 +187,12 @@ public:
                 .vectorize(mmyi)
                 .vectorize(rkxi)
                 .vectorize(rkyi)
-                // .unroll(rkxo)
-                // .unroll(rkyo)
+                .unroll(rkxo)
+                .unroll(rkyo)
                 .vectorize(dx)
                 .vectorize(dy)
-                // .unroll(mmx)
-                // .unroll(mmy)
-                ;
+                .unroll(mmx)
+                .unroll(mmy);
         }
     }
 
