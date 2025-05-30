@@ -229,11 +229,13 @@ int main(int argc, char **argv) {
 #elif defined(RUN_downsample)
                         expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(2 * x + kx, 2 * y + ky));
 #else
-                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x / 2 + kx, y / 2 + ky));
+                        if (ky < kSize / 2 && kx < kSize / 2) {
+                            expected += halide_float16_bits_to_float(kernel(2 * kx + (x & 1), 2 * ky + (y & 1))) * halide_float16_bits_to_float(image(x / 2 + kx, y / 2 + ky));
+                        }
 #endif
                     }
                 }
-                if (fabs(expected - output(x, y)) > 0.001f) {
+                if (std::isnan(output(x, y)) || fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
                               << output(x, y) << " != " << expected << "\n";
@@ -288,7 +290,7 @@ int main(int argc, char **argv) {
 #else
     setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
 #endif
-    
+
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
         matmul(matA.raw_buffer(), matB.raw_buffer(), output.raw_buffer());
