@@ -43,6 +43,14 @@ public:
 
         output(x, y) = conv(x, y);
 
+        // Minimal effect on performance, but makes the IR easier to read
+        output.dim(0).set_min(0);
+        output.dim(1).set_min(0);
+        image.dim(0).set_min(0);
+        image.dim(1).set_min(0);
+        kernel.dim(0).set_bounds(0, kSize);
+        kernel.dim(1).set_bounds(0, kSize).set_stride(kSize);
+
         if (gpu_schedule == Schedule::CUDA) {
             /*---------------------------------*
             |  Tunables                       |
@@ -108,15 +116,15 @@ public:
             |  Tunables                       |
             *---------------------------------*/
             const int blockTileX = 256;
-            const int blockTileY = 1;
+            const int blockTileY = 4;
 
             // We compute 256 contiguous elements
             // as a 32x8 matrix
             const int wmmaTileX = 256;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = 16;
-            const int reductionTileY = 1;
+            const int reductionTileX = kSize;
+            const int reductionTileY = 4;
 
             /*---------------------------------*
             |  Vars / RVars                   |
@@ -129,19 +137,8 @@ public:
             output.split(y, by, mmy, blockTileY)
                 .split(x, bx, mmx, blockTileX)
                 .gpu_blocks(bx, by)
-                .gpu_threads(mmx)
-                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 1)
+                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, wmmaTileX, wmmaTileY)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                .unroll(mmxi)
-                .unroll(mmyi);
-
-            conv
-                .in()
-                .compute_at(output, bx)
-                .split(y, mmy, mmyi, wmmaTileY)
-                .split(x, mmx, mmxi, wmmaTileX)
-                .reorder({mmxi, mmyi, mmx, mmy})
-                .unroll(mmx)
                 .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
@@ -166,13 +163,11 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
-                // TODO(yz): I cannot unroll them because of a bug in synchronizing data to GPU
-                // .unroll(rkyi)
-                // .unroll(rkxo)
+                .unroll(rkyi)
+                .unroll(rkxo)
                 .unroll(rkyo)
-                // .unroll(mmx)
-                // .unroll(mmy)
-                ;
+                .unroll(mmx)
+                .unroll(mmy);
         }
     }
 
