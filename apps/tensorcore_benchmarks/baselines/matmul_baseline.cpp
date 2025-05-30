@@ -137,9 +137,10 @@ int main(int argc, char **argv) {
         CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
         &workspace_size,
         sizeof(workspace_size)), "setting workspace size");
+        
 
     // Heuristic search (picks the best kernel config)
-    cublasLtMatmulHeuristicResult_t heuristicResult[8];
+    cublasLtMatmulHeuristicResult_t heuristicResult;
     int returnedResults = 0;
 
     check_cublas(cublasLtMatmulAlgoGetHeuristic(
@@ -150,54 +151,13 @@ int main(int argc, char **argv) {
         c_desc,
         c_desc,
         preference,
-        24,                      // requestedAlgoCount
-        heuristicResult,       // heuristicResultsArray
+        1,                      // requestedAlgoCount
+        &heuristicResult,       // heuristicResultsArray
         &returnedResults),      // returnAlgoCount
         "getting heuristic"
     );
 
-    cublasLtMatmulAlgo_t selected_algo;
-    bool found_non_tensorcore = false;
-
-    for (int i = 0; i < returnedResults; ++i) {
-        uint64_t impl_flags;
-        size_t size_ret = 0;
-
-        check_cublas(cublasLtMatmulAlgoCapGetAttribute(
-            &heuristicResult[i].algo,
-            CUBLASLT_ALGO_CAP_NUMERICAL_IMPL_FLAGS,
-            &impl_flags,
-            sizeof(impl_flags),
-            &size_ret), "getting numerical impl flags");
-
-        if ((impl_flags & CUBLASLT_NUMERICAL_IMPL_FLAGS_TENSOR_OP_MASK) != 0) {
-            std::cout << "Uses Tensor Cores\n";
-            continue;
-        }
-
-        algo = heuristicResult[i].algo;
-        found_non_tensorcore = true;
-        break;
-    }
-
-    if (!found_non_tensorcore) {
-        std::cerr << "No non-Tensor Core algorithm found!\n";
-        std::exit(EXIT_FAILURE);
-    }
-
-    //algo = heuristicResult.algo;
-
-    int algo_id = -1;
-    size_t size_ret;
-
-    check_cublas(cublasLtMatmulAlgoConfigGetAttribute(
-        &algo,
-        CUBLASLT_ALGO_CONFIG_ID,
-        &algo_id,
-        sizeof(algo_id),
-        &size_ret), "getting algo ID");
-
-    std::cout << "cuBLASLt algorithm ID: " << algo_id << "\n";
+    algo = heuristicResult.algo;
 
     // Allocate device memory
     check_cuda(cudaMalloc(&d_A, M * K * sizeof(half)), "allocating d_A");
