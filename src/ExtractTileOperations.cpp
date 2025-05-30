@@ -991,7 +991,7 @@ struct InsertPendingDefinition : public EqSatIRMutator {
             builder.strides.push_back(1);
             body = LetStmt::make(pd.name + ".buffer", builder.build(), body);
             body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
-        } else if (call_stmt && call_stmt->name == "ConvolutionShuffle") {
+        } else if (call_stmt && (call_stmt->name == "ConvolutionShuffle" || call_stmt->name == "ConvolutionShuffle+")) {
             store_stmt = Store::make(pd.name, pd.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
 
             body = Block::make(store_stmt, body);
@@ -1138,7 +1138,7 @@ struct SubstStores : public EqSatIRMutator {
                         bool can_merge_0_1 = can_merge_shuffles(c0, c1);
                         bool can_merge_1_0 = can_merge_shuffles(c1, c0);
                         if (can_merge_0_1 || can_merge_1_0) {
-                            debug(0) << "Can merge " << pending_definitions[i].name << " and " << pending_definitions[j].name << "\n";
+                            debug(0) << "Can merge " << pending_definitions[i].expr << " and " << pending_definitions[j].expr << "\n";
                             // Add all pending definitions to merged_pending_definitions, except the one we are merging
                             for (size_t k = 0; k < pending_definitions.size(); k++) {
                                 if (k != i && k != j) {
@@ -1230,7 +1230,8 @@ struct SubstStores : public EqSatIRMutator {
         Expr base2 = new_call->args[1];
         can_merge = can_merge && equal(simplify(base1 + length1 * stride), simplify(base2));
 
-        return can_merge;
+        return false;
+//        return can_merge;
     }
 
     Expr merge_shuffles(const Call *new_call, const Call *existing_call) {
