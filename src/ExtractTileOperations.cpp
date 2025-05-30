@@ -1857,17 +1857,18 @@ protected:
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
             for (int j = 0; j < (l1 / steps) + l2; j++) {
-                for (int k = 0; k < repeat_count; k++) {
-                    for (int i = 0; i < l2; i++) {
+                for (int i = 0; i < l2; i++) {
+                    for (int k = 0; k < repeat_count; k++) {
                         int idx_into_filter = j + offset - i * steps;
                         if (0 <= idx_into_filter && idx_into_filter < l1) {
                             indices.push_back(idx_into_filter + k * l1);
                         } else {
-                            indices.push_back(l1);
+                            indices.push_back(l1 * repeat_count);
                         }
                     }
                 }
             }
+
             auto v = Shuffle::make({vec1, vec2}, indices);
             return v;
         } else {
