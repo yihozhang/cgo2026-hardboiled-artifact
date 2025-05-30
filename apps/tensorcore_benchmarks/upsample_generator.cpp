@@ -48,13 +48,26 @@ public:
 
         output(x, y) = conv(x / 2, y / 2, x % 2, y % 2);
 
-        // TODO: Important to clarify how this is different from the conv example
+        // A single convolution can be done as a mat mul using a Toeplitz
+        // matrix. A filter bank can be done as a matmul trivially - each column
+        // is a different filter. This app is awkwardly in between the two. It's
+        // a filter bank, but the number of filters isn't large enough to fill
+        // out a matrix, so the system has to do some sort of block-Toeplitz
+        // thing.
 
         kernel_phases.compute_root();
 
         // The output starts at zero and is even-sized
         output.dim(0).set_bounds(0, (output.dim(0).extent() / 2) * 2);
         output.dim(1).set_bounds(0, (output.dim(1).extent() / 2) * 2);
+
+        // The output stride is also even. Helps storing aligned pairs.
+        output.dim(1).set_stride(output.dim(1).stride() / 2 * 2);
+
+        // The input also starts at zero. Not essential for performance, but
+        // makes the IR easier to read.
+        image.dim(0).set_min(0);
+        image.dim(1).set_min(0);
 
         if (gpu_schedule == Schedule::CUDA) {
             /*---------------------------------*
@@ -120,8 +133,8 @@ public:
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 64;
-            const int blockTileY = 1;
+            const int blockTileX = 128;
+            const int blockTileY = 20;
 
             const int wmmaTileX = 64;
             const int wmmaTileY = 1;
@@ -137,16 +150,15 @@ public:
             RVar rkxo("rkxo"), rkxi("rkxi");
             RVar rkyo("rkyo"), rkyi("rkyi");
 
-            output.split(y, by, mmy, 16 * blockTileY)
-                .split(x, bx, mmx, 2 * blockTileX)
+            output.split(y, by, mmy, blockTileY)
+                .split(x, bx, mmx, blockTileX)
+                .vectorize(mmx, 2)
+                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 2, blockTileY)
+                .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .gpu_blocks(bx, by)
                 .gpu_threads(mmx)
-                .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 2)
-                .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .unroll(mmxi)
                 .unroll(mmyi);
-
-            // Func conv_one_row = conv.update().rfactor({rk.y, u});
 
             conv
                 .in()
