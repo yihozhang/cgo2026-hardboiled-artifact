@@ -235,7 +235,7 @@ int main(int argc, char **argv) {
 #endif
                     }
                 }
-                if (fabs(expected - output(x, y)) > 0.001f) {
+                if (std::isnan(output(x, y)) || fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
                               << output(x, y) << " != " << expected << "\n";
