@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
 
     output.device_sync();
 
-    std::cout << "Runtime: " << time << "\n";
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
     if (VERIFY_OUTPUT) {
@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
 
     output.device_sync();
 
-    std::cout << "Runtime: " << time << "\n";
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
     if (VERIFY_OUTPUT) {
@@ -283,7 +283,12 @@ int main(int argc, char **argv) {
     // Create output buffer
     Buffer<float> output(M, N);
 
+#ifdef _WIN32
+    _putenv_s("HL_CUDA_JIT_MAX_REGISTERS", "256");
+#else
     setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
+#endif
+    
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
         matmul(matA.raw_buffer(), matB.raw_buffer(), output.raw_buffer());
@@ -296,7 +301,7 @@ int main(int argc, char **argv) {
 
     output.device_sync();
 
-    std::cout << "Runtime: " << time << "\n";
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
     if (VERIFY_OUTPUT) {

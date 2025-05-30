@@ -45,12 +45,12 @@ size_t workspace_size = 1 << 24; // 16 MB
 
 void matmul_cublas(const half* h_A, const half* h_B, float* h_C, int M, int N, int K) {
     // Allocate device memory
-    check_cuda(cudaMalloc(&d_A, M * K * sizeof(half)), "allocating d_A");
-    check_cuda(cudaMalloc(&d_B, K * N * sizeof(half)), "allocating d_B");
-    check_cuda(cudaMalloc(&d_C, M * N * sizeof(float)), "allocating d_C");
+    //check_cuda(cudaMalloc(&d_A, M * K * sizeof(half)), "allocating d_A");
+    //check_cuda(cudaMalloc(&d_B, K * N * sizeof(half)), "allocating d_B");
+    //check_cuda(cudaMalloc(&d_C, M * N * sizeof(float)), "allocating d_C");
 
-    check_cuda(cudaMemcpy(d_A, h_A, M * K * sizeof(half), cudaMemcpyHostToDevice), "copying h_A");
-    check_cuda(cudaMemcpy(d_B, h_B, K * N * sizeof(half), cudaMemcpyHostToDevice), "copying h_B");
+    //check_cuda(cudaMemcpy(d_A, h_A, M * K * sizeof(half), cudaMemcpyHostToDevice), "copying h_A");
+    //check_cuda(cudaMemcpy(d_B, h_B, K * N * sizeof(half), cudaMemcpyHostToDevice), "copying h_B");
 
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -66,7 +66,7 @@ void matmul_cublas(const half* h_A, const half* h_B, float* h_C, int M, int N, i
         &beta,
         d_C, CUDA_R_32F, N,
         CUBLAS_COMPUTE_32F_FAST_16F,
-        CUBLAS_GEMM_DEFAULT_TENSOR_OP), "running cublasGemmEx");
+        CUBLAS_GEMM_ALGO4), "running cublasGemmEx");
 }
 
 void matmul_cublasLt(const half* h_A, const half* h_B, float* h_C, int M, int N, int K) {
@@ -91,9 +91,9 @@ void matmul_cublasLt(const half* h_A, const half* h_B, float* h_C, int M, int N,
 
 int main(int argc, char **argv) {                                     
     // Create test data using compile-time definitions                
-    const int M = 8192;//MATMUL_M;                                    
-    const int N = 8192;//MATMUL_N;                                         
-    const int K = 8192;//MATMUL_K;
+    const int M = 1024;//MATMUL_M;                                    
+    const int N = 1024;//MATMUL_N;                                         
+    const int K = 1024;//MATMUL_K;
     
     std::string benchmark_name = "matmul";//BENCHMARK_NAME;
 
@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
         sizeof(workspace_size)), "setting workspace size");
 
     // Heuristic search (picks the best kernel config)
-    cublasLtMatmulHeuristicResult_t heuristicResult;
+    cublasLtMatmulHeuristicResult_t heuristicResult[8];
     int returnedResults = 0;
 
     check_cublas(cublasLtMatmulAlgoGetHeuristic(
@@ -150,13 +150,54 @@ int main(int argc, char **argv) {
         c_desc,
         c_desc,
         preference,
-        1,                      // requestedAlgoCount
-        &heuristicResult,       // heuristicResultsArray
+        24,                      // requestedAlgoCount
+        heuristicResult,       // heuristicResultsArray
         &returnedResults),      // returnAlgoCount
         "getting heuristic"
     );
 
-    algo = heuristicResult.algo;
+    cublasLtMatmulAlgo_t selected_algo;
+    bool found_non_tensorcore = false;
+
+    for (int i = 0; i < returnedResults; ++i) {
+        uint64_t impl_flags;
+        size_t size_ret = 0;
+
+        check_cublas(cublasLtMatmulAlgoCapGetAttribute(
+            &heuristicResult[i].algo,
+            CUBLASLT_ALGO_CAP_NUMERICAL_IMPL_FLAGS,
+            &impl_flags,
+            sizeof(impl_flags),
+            &size_ret), "getting numerical impl flags");
+
+        if ((impl_flags & CUBLASLT_NUMERICAL_IMPL_FLAGS_TENSOR_OP_MASK) != 0) {
+            std::cout << "Uses Tensor Cores\n";
+            continue;
+        }
+
+        algo = heuristicResult[i].algo;
+        found_non_tensorcore = true;
+        break;
+    }
+
+    if (!found_non_tensorcore) {
+        std::cerr << "No non-Tensor Core algorithm found!\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    //algo = heuristicResult.algo;
+
+    int algo_id = -1;
+    size_t size_ret;
+
+    check_cublas(cublasLtMatmulAlgoConfigGetAttribute(
+        &algo,
+        CUBLASLT_ALGO_CONFIG_ID,
+        &algo_id,
+        sizeof(algo_id),
+        &size_ret), "getting algo ID");
+
+    std::cout << "cuBLASLt algorithm ID: " << algo_id << "\n";
 
     // Allocate device memory
     check_cuda(cudaMalloc(&d_A, M * K * sizeof(half)), "allocating d_A");
@@ -168,7 +209,8 @@ int main(int argc, char **argv) {
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {   
-        matmul_cublasLt(h_A, h_B, h_C, M, N, K);
+        //matmul_cublasLt(h_A, h_B, h_C, M, N, K);
+        matmul_cublas(h_A, h_B, h_C, M, N, K);
         check_cuda(cudaDeviceSynchronize(), "sync after matmul_cublas");
     });
 
@@ -186,7 +228,7 @@ int main(int argc, char **argv) {
     cublasLtMatmulDescDestroy(op_desc);
     cublasLtDestroy(lt_handle);
 
-    std::cout << "Runtime: " << time << "\n";
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     return 0;
 }
