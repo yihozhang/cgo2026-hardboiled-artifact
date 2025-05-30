@@ -1120,7 +1120,7 @@ struct SubstStores : public EqSatIRMutator {
                     const Call *c0 = pending_definitions[i].expr.as<Call>();
                     const Call *c1 = pending_definitions[j].expr.as<Call>();
 
-                    if (c0 && c1 && c0->name == c1->name && c0->name == "ConvolutionShuffle") {
+                    if (c0 && c1 && c0->name == c1->name && c0->name.find("ConvolutionShuffle") != string::npos) {
                         bool can_merge_0_1 = can_merge_shuffles(c0, c1);
                         bool can_merge_1_0 = can_merge_shuffles(c1, c0);
                         if (can_merge_0_1 || can_merge_1_0) {
