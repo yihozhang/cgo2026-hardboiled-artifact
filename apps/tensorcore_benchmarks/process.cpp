@@ -71,6 +71,12 @@ uint16_t float_to_float16(float value) {
 
 int main(int argc, char **argv) {
 
+#ifdef _WIN32
+    _putenv_s("HL_CUDA_JIT_MAX_REGISTERS", "256");
+#else
+    setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
+#endif
+
 #if defined(RUN_conv1d)
     // Create test data using compile-time definitions
     const int kSize = KERNEL_SIZE;
@@ -284,12 +290,6 @@ int main(int argc, char **argv) {
 
     // Create output buffer
     Buffer<float> output(M, N);
-
-#ifdef _WIN32
-    _putenv_s("HL_CUDA_JIT_MAX_REGISTERS", "256");
-#else
-    setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
-#endif
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
