@@ -1083,7 +1083,7 @@ struct SubstStores : public EqSatIRMutator {
 
     Stmt get_mutated_program() {
         Stmt out = this->mutate(program);
-        
+
         // Delete duplicate pending definitions
         std::vector<PrologueStmt> unique_pending_definitions;
         for (size_t i = 0; i < pending_definitions.size(); i++) {
@@ -1111,14 +1111,14 @@ struct SubstStores : public EqSatIRMutator {
             merge_happened = false;
 
             std::vector<PrologueStmt> merged_pending_definitions;
-            
+
             for (size_t i = 0; i < pending_definitions.size(); i++) {
                 for (size_t j = 0; j < pending_definitions.size(); j++) {
                     if (i == j) continue;  // Skip self-comparison
 
                     // If they can be merged, merge them
-                    const Call* c0 = pending_definitions[i].expr.as<Call>();
-                    const Call* c1 = pending_definitions[j].expr.as<Call>();
+                    const Call *c0 = pending_definitions[i].expr.as<Call>();
+                    const Call *c1 = pending_definitions[j].expr.as<Call>();
 
                     if (c0 && c1 && c0->name == c1->name && c0->name == "ConvolutionShuffle") {
                         bool can_merge_0_1 = can_merge_shuffles(c0, c1);
@@ -1149,7 +1149,7 @@ struct SubstStores : public EqSatIRMutator {
                                 SubstKernelLoads subst_kernel_loads(pending_definitions[i].name, pending_definitions[j].name, offset);
                                 out = subst_kernel_loads.mutate(out);
                             }
-                            
+
                             merge_happened = true;
                             break;
                         }
@@ -1164,7 +1164,8 @@ struct SubstStores : public EqSatIRMutator {
             }
         };
 
-        debug(0) << "Pending definitions:\n" << pending_definitions.size() << "\n";
+        debug(0) << "Pending definitions:\n"
+                 << pending_definitions.size() << "\n";
         for (auto &pending_definition : pending_definitions) {
             debug(0) << "Pending definition: " << pending_definition.name << " " << pending_definition.expr << "\n";
         }
@@ -1354,7 +1355,7 @@ struct SubstStores : public EqSatIRMutator {
         s = remover.mutate(s);
 
         auto prologues = remover.get_prologues();
-        //prologues = merge_convolution_shuffles(prologues, s);
+        // prologues = merge_convolution_shuffles(prologues, s);
 
         for (auto &prologue : prologues) {
             prologue.trace = trace;
@@ -1496,12 +1497,20 @@ class EnforceWMMALanes : public IRMutator {
         {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8)},
+
+        {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4)},
+
         {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
-        {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f16", Float(32, 4)},
+        
+        {"wmma.load.a.sync.aligned.row.m8n32k16.f16", Int(32, 8)},
+        {"wmma.load.b.sync.aligned.row.m8n32k16.f16", Int(32, 8)},
+        {"wmma.mma.sync.aligned.row.row.m8n32k16.f32.f32", Float(32, 8)},
+        {"wmma.load.c.sync.aligned.row.m8n32k16.f32", Float(32, 8)},
+        {"wmma.load.c.sync.aligned.row.m8n32k16.f16", Float(32, 4)},
     };
 
     Expr get_nth_tile_from_tile_index_wmma(const Expr &e) {
@@ -1795,6 +1804,52 @@ protected:
                         indices.push_back(idx_into_filter);
                     } else {
                         indices.push_back(l1);
+                    }
+                }
+            }
+            auto v = Shuffle::make({vec1, vec2}, indices);
+            return v;
+        } else if (call->name == "ConvolutionShuffle+") {
+            const std::vector<Expr> &args = call->args;
+            internal_assert(args.size() == 9);
+            const auto *var = args[0].as<Variable>();
+            auto base_r = args[1];
+            auto stride_r = args[2];
+            const auto l1_opt = as_const_int(args[3]);
+            const auto l2_opt = as_const_int(args[4]);
+            const auto steps_opt = as_const_int(args[5]);
+            const auto offset_opt = as_const_int(args[6]);
+            const auto repeat_stride_opt = as_const_int(args[7]);
+            const auto repeat_count_opt = as_const_int(args[8]);
+            if (!(var && l1_opt.has_value() && l2_opt.has_value() && offset_opt.has_value() && steps_opt.has_value() &&
+                  repeat_stride_opt.has_value() && repeat_count_opt.has_value())) {
+                internal_error << "ConvolutionShuffle+: arguments have unexpected type\n";
+                return Expr();
+            }
+            auto l1 = l1_opt.value();
+            auto l2 = l2_opt.value();
+            auto offset = offset_opt.value();
+            auto steps = steps_opt.value();
+            auto repeat_stride = repeat_stride_opt.value();
+            auto repeat_count = repeat_count_opt.value();
+            auto ty = Float(16, l1 * repeat_count);
+            Expr vec1 = Load::make(ty, var->name, 
+                Ramp::make(
+                    Ramp::make(base_r, stride_r, l1), 
+                    Broadcast::make(IntImm::make(Int(32), repeat_stride), l1), 
+                    repeat_count
+                ), {}, {}, const_true(l1 * repeat_count), {});
+            Expr vec2 = FloatImm::make(Float(16), 0);
+            vector<int> indices;
+            for (int j = 0; j < (l1 / steps) + l2; j++) {
+                for (int k = 0; k < repeat_count; k++) {
+                    for (int i = 0; i < l2; i++) {
+                        int idx_into_filter = j + offset - i * steps;
+                        if (0 <= idx_into_filter && idx_into_filter < l1) {
+                            indices.push_back(idx_into_filter + k * l1);
+                        } else {
+                            indices.push_back(l1);
+                        }
                     }
                 }
             }

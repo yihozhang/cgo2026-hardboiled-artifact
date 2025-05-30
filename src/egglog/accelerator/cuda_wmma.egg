@@ -9,20 +9,25 @@
 (relation WMMATileA (WMMATileConfig String))
 (WMMATileA (Tile 16 16 16) "wmma.load.a.sync.aligned.row.m16n16k16.f16")
 (WMMATileA (Tile 32 8 16) "wmma.load.a.sync.aligned.row.m32n8k16.f16")
+(WMMATileA (Tile 8 32 16) "wmma.load.a.sync.aligned.row.m8n32k16.f16")
 (relation WMMATileB (WMMATileConfig String))
 (WMMATileB (Tile 16 16 16) "wmma.load.b.sync.aligned.row.m16n16k16.f16")
 (WMMATileB (Tile 32 8 16) "wmma.load.b.sync.aligned.row.m32n8k16.f16")
+(WMMATileB (Tile 8 32 16) "wmma.load.b.sync.aligned.row.m8n32k16.f16")
 (relation WMMATileC (WMMATileConfig String i64))
 (WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f32" 32)
 (WMMATileC (Tile 16 16 16) "wmma.load.c.sync.aligned.row.m16n16k16.f16" 16)
 (WMMATileC (Tile 32 8 16) "wmma.load.c.sync.aligned.row.m32n8k16.f32" 32)
+(WMMATileC (Tile 8 32 16) "wmma.load.c.sync.aligned.row.m8n32k16.f32" 32)
 (relation WMMAGEMM (WMMATileConfig String i64))
 (WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32" 32)
 (WMMAGEMM (Tile 32 8 16) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32" 32)
+(WMMAGEMM (Tile 8 32 16) "wmma.mma.sync.aligned.row.row.m8n32k16.f32.f32" 32)
 (WMMAGEMM (Tile 16 16 16) "wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16" 16)
 (relation WMMATileD (WMMATileConfig String i64))
 (WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f32" 32)
 (WMMATileD (Tile 32 8 16) "wmma.store.d.sync.aligned.row.m32n8k16.f32" 32)
+(WMMATileD (Tile 8 32 16) "wmma.store.d.sync.aligned.row.m8n32k16.f32" 32)
 (WMMATileD (Tile 16 16 16) "wmma.store.d.sync.aligned.row.m16n16k16.f16" 16)
 
 
@@ -489,6 +494,79 @@
     
     (let new-e (Bop (Add) new-e-1 (Bop (Add) new-e-2 mat)))
 
+    (union e new-e)
+))
+
+(rule (
+    (= e (Bop (Add)
+            (VectorReduce (Float acc-bits out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float acc-bits tot-lanes) lhs)
+                    (Cast (Float acc-bits tot-lanes) rhs))
+            )
+            mat))
+    (= out-lanes (* x-lanes y-lanes))
+    (= tot-lanes (* out-lanes r-lanes))
+
+    (= lhs (Load (Float 16 tot-lanes) lhs-name lhs-index))
+    (= lhs-index
+        (Ramp 
+            (Broadcast
+                (Ramp lhs-base (IntImm32 1) r-lanes)
+                x-lanes)
+                ; step = 1 means this is actually a convolution
+            (Broadcast (IntImm32 1) (* r-lanes x-lanes))
+            y-lanes
+        )
+    )
+    
+    (= rhs (Load (Float 16 tot-lanes) rhs-name rhs-index))
+    (= rhs-index
+        (Broadcast (Ramp (Ramp rhs-base (IntImm32 1) r-lanes) 
+            (Broadcast x-stride r-lanes)
+            x-lanes)
+        y-lanes)
+    )
+) (
+    (let new-r-lanes (* r-lanes 2))
+    (let new-y-lanes (/ y-lanes r-lanes))
+    (let new-x-lanes (* x-lanes r-lanes))
+
+    (let new-tot-lanes ( * (* new-x-lanes new-y-lanes) new-r-lanes))
+    (let new-out-lanes (* new-x-lanes new-y-lanes))
+
+    (let new-lhs-index
+        (Ramp 
+            (Broadcast 
+                (Ramp lhs-base (IntImm32 1) new-r-lanes)
+                new-x-lanes)
+            (Broadcast (IntImm32 new-r-lanes) (* new-r-lanes new-x-lanes))
+            new-y-lanes)
+    )
+    (let new-lhs (Load (Float 16 new-tot-lanes) lhs-name new-lhs-index)) ;; r-lanes so it's an overlapping load
+
+    (let new-rhs-index
+        (Broadcast 
+            (Ramp 
+                (Ramp rhs-base (IntImm32 new-x-lanes) new-r-lanes)
+                (Broadcast (IntImm32 1) new-r-lanes)
+                new-x-lanes)
+            new-y-lanes))
+    (let new-rhs-name
+        (ExprVar (Mem)
+            (Call "ConvolutionShuffle+" (Float 16 (* new-r-lanes new-x-lanes))
+                (vec-of (Var (Handle 1) rhs-name) rhs-base (IntImm32 1) (IntImm32 r-lanes) (IntImm32 r-lanes) (IntImm32 1) (IntImm32 0) x-stride (IntImm32 x-lanes)))
+        )
+    )
+    (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
+    (let new-e 
+        (Bop (Add)
+            (VectorReduce (Float 32 out-lanes) (Add)
+                (Bop (Mul)
+                    (Cast (Float 32 new-tot-lanes) new-lhs)
+                    (Cast (Float 32 new-tot-lanes) new-rhs))
+            )
+            mat))
     (union e new-e)
 ))
 
