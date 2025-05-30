@@ -241,7 +241,7 @@
                 (vec-of (Var (Handle 1) (V store-name))
                     tile
                     store-base
-                    (IntImm32 32)
+                    (IntImm32 m-lanes)
                 ))))
     (union s new-s)
 ))
