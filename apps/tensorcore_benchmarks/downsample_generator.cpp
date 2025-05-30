@@ -48,10 +48,10 @@ public:
             |  Tunables                       |
             *---------------------------------*/
             const int blockTileX = 32;
-            const int blockTileY = 8;
+            const int blockTileY = 4;
             const int threadTileX = 2;
-            const int threadTileY = 2;
-            const int reductionTileX = 1;
+            const int threadTileY = 1;
+            const int reductionTileX = kSize;
             const int reductionTileY = 1;
 
             /*---------------------------------*
@@ -66,8 +66,8 @@ public:
             |  1.  Scheduling the kernel that computes the output. Define GPU   |
             |      blocks and thread tiling.                                    |
             *------------------------------------------------------------------*/
-            output.split(y, ty, tyi, 2 * threadTileY)
-                .split(x, tx, txi, 2 * threadTileX)
+            output.split(y, ty, tyi, threadTileY)
+                .split(x, tx, txi, threadTileX)
                 .split(ty, by, ty, blockTileY)
                 .split(tx, bx, tx, blockTileX)
                 .reorder({txi, tyi, tx, ty, bx, by})
@@ -83,7 +83,9 @@ public:
                 .split(y, ty, tyi, threadTileY)
                 .split(x, tx, txi, threadTileX)
                 .reorder({txi, tyi, tx, ty})
-                .vectorize(txi)
+                .unroll(txi)
+                .unroll(tx)
+                .unroll(ty)
                 .unroll(tyi);
 
             /*------------------------------------------------------------------*
@@ -94,11 +96,13 @@ public:
                 .split(x, tx, txi, threadTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
-                .reorder({rkxi, txi, tyi, rkyi, rkxo, rkyo, tx, ty})
+                .reorder({rkxi, txi, tyi, tx, rkxo, ty, rkyi, rkyo})
                 .unroll(rkxi)
                 .unroll(rkyi)
-                .vectorize(txi)
-                .unroll(tyi);
+                .unroll(tx)
+                .unroll(txi);
+
+            image.in(conv).compute_at(conv, ty).unroll(_0).unroll(_1);
         } else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*
             |  Tunables                       |
@@ -129,8 +133,7 @@ public:
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 1)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
                 .unroll(mmxi)
-                .unroll(mmyi)
-                ;
+                .unroll(mmyi);
 
             conv
                 .in()
@@ -141,8 +144,7 @@ public:
                 .unroll(mmx)
                 .unroll(mmy)
                 .vectorize(mmxi)
-                .vectorize(mmyi)
-                ;
+                .vectorize(mmyi);
 
             conv.compute_at(output, bx)
                 .store_in(MemoryType::WMMAAccumulator)
@@ -152,8 +154,7 @@ public:
                 .vectorize(mmyi)
                 .reorder({mmxi, mmyi, mmx, mmy})
                 .unroll(mmx)
-                .unroll(mmy)
-                ;
+                .unroll(mmy);
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
@@ -168,7 +169,7 @@ public:
                 // TODO(yz): I cannot unroll them because of a bug in synchronizing data to GPU
                 // .unroll(rkyi)
                 // .unroll(rkxo)
-                // .unroll(rkyo)
+                .unroll(rkyo)
                 // .unroll(mmx)
                 // .unroll(mmy)
                 ;

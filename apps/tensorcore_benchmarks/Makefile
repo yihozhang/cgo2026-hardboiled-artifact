@@ -63,3 +63,17 @@ $(BIN)/%/downsample.a: $(GENERATOR_BIN)/downsample.generator
 $(BIN)/%/downsample: process.cpp $(BIN)/%/downsample.a 
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/downsample.h\"" -DBENCHMARK_NAME="\"downsample\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_downsample
+
+
+$(GENERATOR_BIN)/matmul.generator: matmul_generator.cpp $(GENERATOR_DEPS)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ $(LIBHALIDE_LDFLAGS)
+
+.PRECIOUS: $(BIN)/%/matmul.a
+$(BIN)/%/matmul.a: $(GENERATOR_BIN)/matmul.generator
+	@mkdir -p $(@D)
+	$^ -g matmul -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f matmul target=$(HL_TARGET) gpu_schedule=$* M=1024 N=1024 K=1024
+
+$(BIN)/%/matmul: process.cpp $(BIN)/%/matmul.a 
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/matmul.h\"" -DBENCHMARK_NAME="\"matmul\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DMATMUL_N=1024 -DMATMUL_M=1024 -DMATMUL_K=1024 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_matmul

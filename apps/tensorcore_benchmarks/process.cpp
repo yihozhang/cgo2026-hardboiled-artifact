@@ -263,14 +263,14 @@ int main(int argc, char **argv) {
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create matrix buffers with random values
-    Buffer<uint16_t> matA(M, K);
+    Buffer<uint16_t> matA(K, M);
     for (int y = 0; y < M; y++) {
         for (int x = 0; x < K; x++) {
             matA(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
         }
     }
 
-    Buffer<uint16_t> matB(K, N);
+    Buffer<uint16_t> matB(N, K);
     for (int y = 0; y < K; y++) {
         for (int x = 0; x < N; x++) {
             matB(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
