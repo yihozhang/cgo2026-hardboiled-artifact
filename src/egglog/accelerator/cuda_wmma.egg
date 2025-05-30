@@ -226,30 +226,25 @@
         (union s new-s)
     ))
 
-;; HACK: THIS RULE IS NOT SUPPOSED TO WORK, BECAUSE IT DISREGARDS THE TENSOR SHAPE
 (rule (
-        (= s (Store store-name (WMMA2Mem tile) index))
-        (= index (Ramp base (IntImm32 1) tot-lanes))
-        (has-type tile (Float bits _lanes))
+    (= s (Store store-name (WMMA2Mem tile) store-index))
+    (= tile (Load (Float bits _lanes) (V tile-name) load-index))
 
-        (= 0 (% tot-lanes 32))
-        (= 0 (% tot-lanes 8))
-
-        (= m-lanes (/ tot-lanes 32))
-        (= n-lanes (/ tot-lanes 8))
-        (= n-stride (/ tot-lanes 32))
-        
-        (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
-    ) (
-        (let new-s (Evaluate
-                (Call intrinsic (Int 32 1)
-                    (vec-of (Var (Handle 1) (V store-name))
-                        tile
-                        base
-                        (IntImm32 n-stride)
-                    ))))
-        (union s new-s)
-    ))
+    (= store-index (Ramp store-base (IntImm32 1) tot-lanes))
+    (= load-index (Ramp tile-base (IntImm32 1) tot-lanes))
+    (WMMAAllocation tile-name n-lanes m-lanes)
+    
+    (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
+) (
+    (let new-s (Evaluate
+            (Call intrinsic (Int 32 1)
+                (vec-of (Var (Handle 1) (V store-name))
+                    tile
+                    store-base
+                    (IntImm32 32)
+                ))))
+    (union s new-s)
+))
 
 
 ;; loading matrices A and B
