@@ -120,15 +120,13 @@ public:
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
-            const int blockTileX = 32;
+            const int blockTileX = 64;
             const int blockTileY = 1;
 
-            // We compute 256 contiguous elements
-            // as a 32x8 matrix
-            const int wmmaTileX = 32;
+            const int wmmaTileX = 64;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = kSize / 2;
+            const int reductionTileX = 8;
             const int reductionTileY = 1;
 
             /*---------------------------------*
@@ -145,8 +143,9 @@ public:
                 .gpu_threads(mmx)
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, 16, 2)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                .unroll(mmxi)
-                .unroll(mmyi);
+                // .unroll(mmxi)
+                // .unroll(mmyi)
+                ;
 
             // Func conv_one_row = conv.update().rfactor({rk.y, u});
 
@@ -155,17 +154,16 @@ public:
                 .compute_at(output, bx)
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
-                .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
+                .reorder({dx, dy, mmxi, mmyi, mmx, mmy})
                 .vectorize(dx)
                 .vectorize(dy)
-                .unroll(dx)
-                .unroll(dy)
-                .unroll(mmx)
-                .unroll(mmy)
+                // .unroll(mmx)
+                // .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
 
-            conv.reorder_storage(x, dx, dy, y);
+            conv.reorder_storage(dx, dy, x, y);
+            conv.in().reorder_storage(dx, dy, x, y);
 
             conv.compute_at(output, bx)
                 .store_in(MemoryType::WMMAAccumulator)
@@ -173,11 +171,11 @@ public:
                 .split(x, mmx, mmxi, wmmaTileX)
                 .vectorize(mmxi)
                 .vectorize(mmyi)
-                .reorder({mmxi, mmyi, dx, dy, mmx, mmy})
-                .unroll(dx)
-                .unroll(dy)
-                .unroll(mmx)
-                .unroll(mmy)
+                .reorder({dx, dy, mmxi, mmyi, mmx, mmy})
+                // .unroll(dx)
+                // .unroll(dy)
+                // .unroll(mmx)
+                // .unroll(mmy)
                 .vectorize(dx)
                 .vectorize(dy);
 
@@ -186,18 +184,19 @@ public:
                 .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
                 .split(rk.y, rkyo, rkyi, reductionTileY)
-                .reorder({rkxi, mmxi, rkyi, mmyi, dx, dy, mmy, rkxo, rkyo, mmx})
+                .reorder({rkxi, dx, dy, mmxi, rkyi, mmyi, mmy, rkxo, rkyo, mmx})
                 .atomic()
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
                 .vectorize(rkyi)
-                .unroll(rkxo)
-                .unroll(rkyo)
+                // .unroll(rkxo)
+                // .unroll(rkyo)
                 .vectorize(dx)
                 .vectorize(dy)
-                .unroll(mmx)
-                .unroll(mmy);
+                // .unroll(mmx)
+                // .unroll(mmy)
+                ;
         }
     }
 
