@@ -718,6 +718,7 @@ class AnnotateDataMovement : public IRMutator {
 
 public:
     AnnotateDataMovement() = default;
+    bool no_accelerator_allocations = true;
 
 protected:
     std::map<string, MemoryType> vars_memory_type;
@@ -738,6 +739,8 @@ protected:
         } else if (op->memory_type != MemoryType::WMMAA && op->memory_type != MemoryType::WMMAB) {
             return IRMutator::visit(op);
         }
+        
+        no_accelerator_allocations = false;
 
         std::map<string, MemoryType> curr_vars_memory_type(this->vars_memory_type);
         curr_vars_memory_type[op->name] = op->memory_type;
@@ -1924,7 +1927,11 @@ Stmt extract_tile_operations(const Stmt &s) {
 }
 
 Stmt eqsat_extract_tile_operations(const Stmt &s) {
-    auto annotated_s = EqSatExtensions::AnnotateDataMovement().mutate(s);
+    auto annotate = EqSatExtensions::AnnotateDataMovement();
+    auto annotated_s = annotate.mutate(s);
+    if (annotate.no_accelerator_allocations) {
+        return s;
+    }
     EqSatExtensions::CollectStores collect_stores;
     auto result = collect_stores.mutate(annotated_s);
     auto &stores = collect_stores.stores;

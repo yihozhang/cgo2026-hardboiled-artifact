@@ -4,8 +4,9 @@ include ../support/Makefile.inc
 
 KERNEL_SIZE ?= 16
 
-all: $(BIN)/cuda_only/conv1d $(BIN)/tensorcore/conv1d
-
+all: all_cuda_only all_tensorcore
+all_cuda_only: $(BIN)/cuda_only/matmul $(BIN)/cuda_only/conv1d $(BIN)/cuda_only/conv2d $(BIN)/cuda_only/downsample $(BIN)/cuda_only/upsample
+all_tensorcore: $(BIN)/tensorcore/matmul $(BIN)/tensorcore/conv1d $(BIN)/tensorcore/conv2d $(BIN)/tensorcore/downsample $(BIN)/tensorcore/upsample
 clean:
 	rm -rf $(BIN)
 
