@@ -232,12 +232,13 @@
         (= index (Ramp base (IntImm32 1) tot-lanes))
         (has-type tile (Float bits _lanes))
 
-        (= 0 (% tot-lanes 32))
-        (= 0 (% tot-lanes 8))
+        ; (= 0 (% tot-lanes 32))
+        ; (= 0 (% tot-lanes 8))
 
-        (= m-lanes (/ tot-lanes 32))
-        (= n-lanes (/ tot-lanes 8))
-        (= n-stride (/ tot-lanes 32))
+        ; (= m-lanes (/ tot-lanes 32))
+        ; (= n-lanes (/ tot-lanes 8))
+        ; (= n-stride (/ tot-lanes 32))
+        (= n-lanes 8)
         
         (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
     ) (
@@ -246,7 +247,7 @@
                     (vec-of (Var (Handle 1) (V store-name))
                         tile
                         base
-                        (IntImm32 n-stride)
+                        (IntImm32 32)
                     ))))
         (union s new-s)
     ))
