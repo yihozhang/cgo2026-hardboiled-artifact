@@ -36,7 +36,7 @@ add_halide_generator(downsample.generator SOURCES downsample_generator.cpp)
 add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
 
 # Create compiled libraries (adding extra targets for cross-compilation)
-add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_86)
+add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_80)
 add_conv_library(conv1d_lib_win conv1d x86-64-windows-cuda-cuda_capability_86)
 add_conv_library(conv1d_lib_linux conv1d x86-64-linux-cuda-cuda_capability_86)
 

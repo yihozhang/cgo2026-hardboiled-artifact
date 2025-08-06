@@ -137,6 +137,6 @@ case "$TARGET" in
         cmake --build build --target ${BENCHMARK}_lib_linux.runtime.update
         ;;
     *)
-        cmake --build build --target ${BENCHMARK}_lib
+        cmake --build build --target ${BENCHMARK}
         ;;
 esac
