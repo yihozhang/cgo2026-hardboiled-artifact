@@ -12,37 +12,23 @@ benchmarks = [
     # Conv1D
     {"-b": "conv1d", "-conv_k": 128, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
     {"-b": "conv1d", "-conv_k": 128, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
-    {"-b": "conv1d", "-conv_k": 128, "-conv_col": 15360, "-conv_row": 8640, "-v": False},
-    {"-b": "conv1d", "-conv_k": 128, "-conv_col": 30720, "-conv_row": 17280, "-v": False},
-    {"-b": "conv1d", "-conv_k": 128, "-conv_col": 61440, "-conv_row": 34560, "-v": False},
-
+    
     # Conv2D
-    {"-b": "conv2d", "-conv_k": 32, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
-    {"-b": "conv2d", "-conv_k": 32, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
-    {"-b": "conv2d", "-conv_k": 32, "-conv_col": 15360, "-conv_row": 8640, "-v": False},
-    {"-b": "conv2d", "-conv_k": 32, "-conv_col": 30720, "-conv_row": 17280, "-v": False},
-    {"-b": "conv2d", "-conv_k": 32, "-conv_col": 61440, "-conv_row": 34560, "-v": False},
-
+    {"-b": "conv2d", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
+    {"-b": "conv2d", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+    
     # Upsample
     {"-b": "upsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
     {"-b": "upsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 15360, "-conv_row": 8640, "-v": False},
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 30720, "-conv_row": 17280, "-v": False},
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 61440, "-conv_row": 34560, "-v": False},
-
+    
     # Downsample
     {"-b": "downsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
     {"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 15360, "-conv_row": 8640, "-v": False},
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 30720, "-conv_row": 17280, "-v": False},
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 61440, "-conv_row": 34560, "-v": False},
-
+    
     # Matmul
     {"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
-    {"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
-    {"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
-    {"-b": "matmul", "-mm_mnk": 8192,  "-v": False},
-    {"-b": "matmul", "-mm_mnk": 16384, "-v": False},
+    #{"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
+    #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -158,7 +144,7 @@ def write_log_entry(output, log_file):
 
 def main():
     results = []
-    hardware = "GTX 4090"  # Hardware information
+    hardware = "A100_80GB"  # Hardware information
     
     # Initialize files
     raw_results_file = "raw_results.csv"
@@ -166,9 +152,9 @@ def main():
     log_file = "results.csv"
     
     # Clear existing files
-    #for file in [raw_results_file, speedups_file, log_file]:
-        #if os.path.exists(file):
-            #os.remove(file)
+    for file in [raw_results_file, speedups_file, log_file]:
+        if os.path.exists(file):
+            os.remove(file)
     
     # Dictionary to store results for speedup calculation
     config_results = defaultdict(dict)
@@ -178,27 +164,25 @@ def main():
             # Print the benchmark name and schedule
             print(f"=== Running {benchmark['-b']}; Schedule: {schedule}, Config: {benchmark['-conv_k']}, {benchmark['-conv_row']}, {benchmark['-conv_col']}, {benchmark['-v']} ===\n")
             
-            # Step 1: Rebuild
+            # Step 1: Rebuild binary (note: if compiling for anything other than host, it will build the lib instead of the binary)
             env = os.environ.copy()
-            env["HL_DEBUG_CODEGEN"] = "1"
             rebuild_args = dict_to_cmd_args(benchmark)
-            rebuild_args.extend(["-t", "win", "-s", schedule])
+            rebuild_args.extend(["-t", "host", "-s", schedule])
             run_or_exit(["./rebuild.sh"] + rebuild_args, env=env)
 
-            # Step 2: Execute on remote machine via SSH and capture output
+            # Step 2: Execute compiled binary
             ssh_args = dict_to_cmd_args(benchmark)
-            ssh_args.extend(["-s", schedule])
-            output = run_or_exit(["./ssh_win.sh"] + ssh_args)
+            output = run_or_exit(["./build/conv1d"])
             
-            # Write to log file immediately
+            # Write raw output to log file
             write_log_entry(output, log_file)
 
             # Step 3: Parse the output
             result = parse_benchmark_output(output)
-            result['hardware'] = hardware  # Add hardware information
+            result['hardware'] = hardware
             results.append(result)
             
-            # Write raw result to CSV immediately
+            # Write parsed csv to results file
             write_result_to_csv(result, raw_results_file)
             
             # Store result for speedup calculation
