@@ -702,7 +702,7 @@ class InjectBufferCopies : public IRMutator {
                 // There's no host allocation, so substitute any
                 // references to it (e.g. the one in the make_buffer
                 // call) with NULL.
-                body = substitute(op->name, reinterpret(Handle(), make_zero(UInt(64))), body);
+                // body = substitute(op->name, reinterpret(Handle(), make_zero(UInt(64))), body);
             }
 
             return Allocate::make(op->name, op->type, op->memory_type, op->extents,
