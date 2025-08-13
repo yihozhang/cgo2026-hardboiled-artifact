@@ -1,6 +1,4 @@
-#include "HalideBuffer.h"
-#include "HalideRuntime.h"
-#include "HalideRuntimeCuda.h"
+#include "Halide.h"
 #include "halide_benchmark.h"
 
 #include <cmath>
@@ -17,65 +15,9 @@
 using namespace Halide::Runtime;
 using namespace Halide::Tools;
 
-float bfloat16_to_float(uint16_t b) {
-    // Assume little-endian floats
-    uint16_t bits[2] = {0, b};
-    float ret;
-    memcpy(&ret, bits, sizeof(float));
-    return ret;
-}
-
-// Stole this from Halide's float16.h since I didn't find it in runtime
-uint16_t float_to_float16(float value) {
-    // Start by copying over the sign bit
-    uint16_t bits = std::signbit(value) << 15;
-
-    // Check for special values
-    if (value == 0) {
-        return bits;
-    } else if (std::isnan(value)) {
-        return bits | 0x7c00 | 0x03ff;
-    } else if (std::isinf(value)) {
-        return bits | 0x7c00;
-    }
-
-    int exp;
-    // Get exponent, with bias already subtracted.
-    std::frexp(value, &exp);
-    if (exp > 16) {
-        // Too large, return infinity. Per initialization, bits only
-        // contains the sign bit, so this is +/-inf.
-        return bits | 0x7c00;
-    } else if (exp < -13) {
-        // Too small, clamp to 2^-24
-        value = std::ldexp(value, 24);
-    } else {
-        // Move the exponent from the float into the half.
-        value = std::ldexp(value, 11 - exp);
-        bits |= ((exp + 13) << 10);
-    }
-
-    // We've normalized value as much as possible. Put the integer
-    // portion of it into the mantissa.
-    float ival;
-    float frac = std::modf(value, &ival);
-    bits += (uint16_t)(std::abs((int)ival));
-
-    // Now consider the fractional part. We round to nearest with ties
-    // going to even.
-    frac = std::abs(frac);
-    bits += (frac > 0.5f) | ((frac == 0.5f) & bits);
-
-    return bits;
-}
-
 int main(int argc, char **argv) {
 
-#ifdef _WIN32
-    _putenv_s("HL_CUDA_JIT_MAX_REGISTERS", "256");
-#else
     setenv("HL_CUDA_JIT_MAX_REGISTERS", "256", 1);
-#endif
 
 #if defined(RUN_conv1d)
     // Create test data using compile-time definitions
@@ -91,28 +33,25 @@ int main(int argc, char **argv) {
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create image buffer with random values
-    Buffer<uint16_t> image(imgW, imgH);
+    Buffer<Halide::float16_t> image(imgW, imgH);
     for (int y = 0; y < imgH; y++) {
         for (int x = 0; x < imgW; x++) {
-            image(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+            image(x, y) = Halide::float16_t(rand() & 1);
         }
     }
 
     // Create kernel buffer
-    Buffer<uint16_t> kernel(kSize);
+    Buffer<Halide::float16_t> kernel(kSize);
     for (int i = 0; i < kSize; i++) {
-        kernel(i) = float_to_float16(i & 1);
+        kernel(i) = Halide::float16_t(i & 1);
     }
-
-    image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-    kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
     // Create output buffer
     Buffer<float> output(imgW - kSize, imgH);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
-        conv1d(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+        conv1d(kernel, image, output);
         output.device_sync();
     });
 
@@ -125,7 +64,7 @@ int main(int argc, char **argv) {
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
-    if (VERIFY_OUTPUT) {
+    if (std::getenv("VERIFY_OUTPUT")) {
         bool success = true;
         for (int y = 0; y < imgH; y++) {
             if (!success) {
@@ -137,7 +76,7 @@ int main(int argc, char **argv) {
                 }
                 float expected = 0.0f;
                 for (int k = 0; k < kSize; k++) {
-                    expected += halide_float16_bits_to_float(kernel(k)) * halide_float16_bits_to_float(image(x + k, y));
+                    expected += float(kernel(k)) * float(image(x + k, y));
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
@@ -169,23 +108,20 @@ int main(int argc, char **argv) {
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create image buffer with random values
-    Buffer<uint16_t> image(imgW, imgH);
+    Buffer<Halide::float16_t> image(imgW, imgH);
     for (int y = 0; y < imgH; y++) {
         for (int x = 0; x < imgW; x++) {
-            image(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+            image(x, y) = Halide::float16_t(rand() & 1);
         }
     }
 
     // Create kernel buffer
-    Buffer<uint16_t> kernel(kSize, kSize);
+    Buffer<Halide::float16_t> kernel(kSize, kSize);
     for (int i = 0; i < kSize; i++) {
         for (int j = 0; j < kSize; j++) {
-            kernel(i, j) = float_to_float16((i ^ j) & 1);
+            kernel(i, j) = Halide::float16_t((i ^ j) & 1);
         }
     }
-
-    image.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-    kernel.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
 #if defined(RUN_conv2d)
 #define outW (imgW - kSize)
@@ -204,7 +140,7 @@ int main(int argc, char **argv) {
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
-        fn(kernel.raw_buffer(), image.raw_buffer(), output.raw_buffer());
+        fn(kernel, image, output);
         output.device_sync();
     });
 
@@ -217,7 +153,7 @@ int main(int argc, char **argv) {
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
-    if (VERIFY_OUTPUT) {
+    if (std::getenv("VERIFY_OUTPUT")) {
         bool success = true;
         for (int y = 0; y < outH; y++) {
             if (!success) {
@@ -231,12 +167,12 @@ int main(int argc, char **argv) {
                 for (int ky = 0; ky < kSize; ky++) {
                     for (int kx = 0; kx < kSize; kx++) {
 #if defined(RUN_conv2d)
-                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(x + kx, y + ky));
+                        expected += float(kernel(kx, ky)) * float(image(x + kx, y + ky));
 #elif defined(RUN_downsample)
-                        expected += halide_float16_bits_to_float(kernel(kx, ky)) * halide_float16_bits_to_float(image(2 * x + kx, 2 * y + ky));
+                        expected += float(kernel(kx, ky)) * float(image(2 * x + kx, 2 * y + ky));
 #else
                         if (ky < kSize / 2 && kx < kSize / 2) {
-                            expected += halide_float16_bits_to_float(kernel(2 * kx + (x & 1), 2 * ky + (y & 1))) * halide_float16_bits_to_float(image(x / 2 + kx, y / 2 + ky));
+                            expected += float(kernel(2 * kx + (x & 1), 2 * ky + (y & 1))) * float(image(x / 2 + kx, y / 2 + ky));
                         }
 #endif
                     }
@@ -271,29 +207,26 @@ int main(int argc, char **argv) {
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create matrix buffers with random values
-    Buffer<uint16_t> matA(K, M);
+    Buffer<Halide::float16_t> matA(K, M);
     for (int y = 0; y < M; y++) {
         for (int x = 0; x < K; x++) {
-            matA(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+            matA(x, y) = Halide::float16_t(rand() & 1);
         }
     }
 
-    Buffer<uint16_t> matB(N, K);
+    Buffer<Halide::float16_t> matB(N, K);
     for (int y = 0; y < K; y++) {
         for (int x = 0; x < N; x++) {
-            matB(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+            matB(x, y) = Halide::float16_t(rand() & 1);
         }
     }
-
-    matA.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-    matB.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
     // Create output buffer
     Buffer<float> output(M, N);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
-        matmul(matA.raw_buffer(), matB.raw_buffer(), output.raw_buffer());
+        matmul(matA, matB, output);
         output.device_sync();
     });
 
@@ -306,7 +239,7 @@ int main(int argc, char **argv) {
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     // Verify results
-    if (VERIFY_OUTPUT) {
+    if (std::getenv("VERIFY_OUTPUT")) {
         bool success = true;
         for (int y = 0; y < 256; y++) {
             if (!success) {
@@ -318,7 +251,7 @@ int main(int argc, char **argv) {
                 }
                 float expected = 0.0f;
                 for (int k = 0; k < K; k++) {
-                    expected += halide_float16_bits_to_float(matA(k, y)) * halide_float16_bits_to_float(matB(x, k));
+                    expected += float(matA(k, y)) * float(matB(x, k));
                 }
                 if (fabs(expected - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "

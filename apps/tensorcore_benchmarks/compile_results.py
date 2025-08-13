@@ -27,8 +27,8 @@ benchmarks = [
     
     # Matmul
     {"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
-    #{"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
-    #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
+    {"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
+    {"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -46,12 +46,17 @@ def parse_benchmark_output(output):
     
     # Extract kernel size
     kernel_match = re.search(r'Kernel size: (\d+)', output)
-    kernel_size = int(kernel_match.group(1)) if kernel_match else None
+    kernel_size = int(kernel_match.group(1)) if kernel_match else 'N/A'
     
     # Extract image size
     image_match = re.search(r'Image size: (\d+)x(\d+)', output)
     width = int(image_match.group(1)) if image_match else None
     height = int(image_match.group(2)) if image_match else None
+
+    # Extract matrix size
+    image_match = re.search(r'Matrix size: (\d+)x(\d+)x(\d+)', output)
+    width = int(image_match.group(1)) if image_match else width
+    height = int(image_match.group(2)) if image_match else height
     
     # Extract schedule
     schedule_match = re.search(r'Schedule: (\w+)', output)
@@ -67,7 +72,9 @@ def parse_benchmark_output(output):
         runtime = None
     
     # Check if outputs match
-    outputs_match = "Outputs match!" in output
+    outputs_match = "N/A"
+    outputs_match = True if "Outputs match" in output else outputs_match
+    outputs_match = False if "Outputs do not match" in output else outputs_match
     
     return {
         'benchmark': benchmark,
@@ -85,7 +92,7 @@ def compute_speedups(results):
     for result in results:
         key = (result['benchmark'], result['kernel_size'], result['width'], result['height'])
         configs[key][result['schedule']] = float(result['runtime'])
-    
+
     # Compute speedups
     speedups = []
     for (benchmark, ksize, width, height), runtimes in configs.items():
@@ -96,7 +103,7 @@ def compute_speedups(results):
             speedups.append({
                 'benchmark': benchmark,
                 'kernel_size': ksize,
-                'resolution': f"{width}x{height}",
+                'input_size': f"{width}x{height}",
                 'cuda_time': f"{cuda_time:.9f}",
                 'tensor_time': f"{tensor_time:.9f}",
                 'speedup': f"{speedup:.2f}x"
@@ -131,11 +138,11 @@ def write_speedup_to_csv(speedup, csv_file):
     """Write a single speedup result to the CSV file."""
     # Check if file exists to determine if we need to write header
     file_exists = os.path.exists(csv_file)
-    
+
     with open(csv_file, "a") as f:
         if not file_exists:
-            f.write("hardware,benchmark,kernel_size,resolution,cuda_time,tensor_time,speedup\n")
-        f.write(f"{speedup['hardware']},{speedup['benchmark']},{speedup['kernel_size']},{speedup['resolution']},{speedup['cuda_time']},{speedup['tensor_time']},{speedup['speedup']}\n")
+            f.write("hardware,benchmark,kernel_size,input_size,cuda_time,tensor_time,speedup\n")
+        f.write(f"{speedup['hardware']},{speedup['benchmark']},{speedup['kernel_size']},{speedup['input_size']},{speedup['cuda_time']},{speedup['tensor_time']},{speedup['speedup']}\n")
 
 def write_log_entry(output, log_file):
     """Write a single log entry to the log file."""
@@ -149,7 +156,7 @@ def main():
     # Initialize files
     raw_results_file = "raw_results.csv"
     speedups_file = "speedups.csv"
-    log_file = "results.csv"
+    log_file = "results.log"
     
     # Clear existing files
     for file in [raw_results_file, speedups_file, log_file]:
@@ -161,8 +168,9 @@ def main():
     
     for benchmark in benchmarks:
         for schedule in schedules:
-            # Print the benchmark name and schedule
-            print(f"=== Running {benchmark['-b']}; Schedule: {schedule}, Config: {benchmark['-conv_k']}, {benchmark['-conv_row']}, {benchmark['-conv_col']}, {benchmark['-v']} ===\n")
+            # Print the benchmark name, schedule, and full config
+            config_str = ', '.join(f"{k}={v}" for k, v in benchmark.items() if k != '-b')
+            print(f"=== Running {benchmark['-b']}; Schedule: {schedule}, Config: {config_str} ===\n")
             
             # Step 1: Rebuild binary (note: if compiling for anything other than host, it will build the lib instead of the binary)
             env = os.environ.copy()
@@ -171,8 +179,12 @@ def main():
             run_or_exit(["./rebuild.sh"] + rebuild_args, env=env)
 
             # Step 2: Execute compiled binary
-            ssh_args = dict_to_cmd_args(benchmark)
-            output = run_or_exit(["./build/conv1d"])
+            if benchmark['-v']:
+                os.environ['VERIFY_OUTPUT'] = '1'
+            else:
+                os.environ.pop('VERIFY_OUTPUT', None)
+            env = os.environ.copy()
+            output = run_or_exit(["./build/" + benchmark['-b']], env=env)
             
             # Write raw output to log file
             write_log_entry(output, log_file)
@@ -194,11 +206,12 @@ def main():
                 cuda_time = config_results[key]['cuda_only']
                 tensor_time = config_results[key]['tensorcore']
                 speedup = cuda_time / tensor_time
+
                 speedup_result = {
                     'hardware': hardware,
                     'benchmark': result['benchmark'],
                     'kernel_size': result['kernel_size'],
-                    'resolution': f"{result['width']}x{result['height']}",
+                    'input_size': f"{result['width']}x{result['height']}",
                     'cuda_time': f"{cuda_time:.9f}",
                     'tensor_time': f"{tensor_time:.9f}",
                     'speedup': f"{speedup:.2f}x"

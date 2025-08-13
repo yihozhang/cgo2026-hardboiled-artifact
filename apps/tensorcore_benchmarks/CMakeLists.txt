@@ -37,24 +37,24 @@ add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
 
 # Create compiled libraries (adding extra targets for cross-compilation)
 add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_80)
-add_conv_library(conv1d_lib_win conv1d x86-64-windows-cuda-cuda_capability_86)
-add_conv_library(conv1d_lib_linux conv1d x86-64-linux-cuda-cuda_capability_86)
+add_conv_library(conv1d_lib_win conv1d x86-64-windows-cuda-cuda_capability_80)
+add_conv_library(conv1d_lib_linux conv1d x86-64-linux-cuda-cuda_capability_80)
 
-add_conv_library(conv2d_lib conv2d host-cuda-cuda_capability_86)
-add_conv_library(conv2d_lib_win conv2d x86-64-windows-cuda-cuda_capability_86)
-add_conv_library(conv2d_lib_linux conv2d x86-64-linux-cuda-cuda_capability_86)
+add_conv_library(conv2d_lib conv2d host-cuda-cuda_capability_80)
+add_conv_library(conv2d_lib_win conv2d x86-64-windows-cuda-cuda_capability_80)
+add_conv_library(conv2d_lib_linux conv2d x86-64-linux-cuda-cuda_capability_80)
 
-add_conv_library(upsample_lib upsample host-cuda-cuda_capability_86)
-add_conv_library(upsample_lib_win upsample x86-64-windows-cuda-cuda_capability_86)
-add_conv_library(upsample_lib_linux upsample x86-64-linux-cuda-cuda_capability_86)
+add_conv_library(upsample_lib upsample host-cuda-cuda_capability_80)
+add_conv_library(upsample_lib_win upsample x86-64-windows-cuda-cuda_capability_80)
+add_conv_library(upsample_lib_linux upsample x86-64-linux-cuda-cuda_capability_80)
 
-add_conv_library(downsample_lib downsample host-cuda-cuda_capability_86)
-add_conv_library(downsample_lib_win downsample x86-64-windows-cuda-cuda_capability_86)
-add_conv_library(downsample_lib_linux downsample x86-64-linux-cuda-cuda_capability_86)
+add_conv_library(downsample_lib downsample host-cuda-cuda_capability_80)
+add_conv_library(downsample_lib_win downsample x86-64-windows-cuda-cuda_capability_80)
+add_conv_library(downsample_lib_linux downsample x86-64-linux-cuda-cuda_capability_80)
 
-add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_86)
-add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_86)
-add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_86)
+add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
+add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
+add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_80)
 
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
@@ -74,6 +74,7 @@ target_compile_definitions(conv1d
     SCHEDULE="${SCHEDULE}"
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
+
 target_compile_definitions(conv2d
     PRIVATE
     BENCHMARK_HEADER="conv2d_lib.h"
@@ -125,18 +126,35 @@ target_compile_definitions(matmul
 target_link_libraries(conv1d
     PRIVATE
     conv1d_lib
+    Halide::Halide
     Halide::Tools
 )
 
 target_link_libraries(conv2d
     PRIVATE
     conv2d_lib
+    Halide::Halide
+    Halide::Tools
+)
+
+target_link_libraries(upsample
+    PRIVATE
+    upsample_lib
+    Halide::Halide
+    Halide::Tools
+)
+
+target_link_libraries(downsample
+    PRIVATE
+    downsample_lib
+    Halide::Halide
     Halide::Tools
 )
 
 target_link_libraries(matmul
     PRIVATE
     matmul_lib
+    Halide::Halide
     Halide::Tools
 )
 
