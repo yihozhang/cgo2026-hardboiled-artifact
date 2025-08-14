@@ -100,8 +100,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate benchmark name
-if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample)$ ]]; then
-    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be either 'conv1d', 'conv2d', 'upsample', 'downsample', or 'matmul'"
+if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample|conv_layer)$ ]]; then
+    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be either 'conv1d', 'conv2d', 'upsample', 'downsample', 'matmul', or 'conv_layer'"
     exit 1
 fi
 
