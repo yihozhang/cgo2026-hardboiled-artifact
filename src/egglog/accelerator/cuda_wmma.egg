@@ -400,7 +400,7 @@
 ))
 
 
-;; Upsampling
+;; Downsampling
 (rule (
     (= e (Bop (Add)
             (VectorReduce (Float 32 out-lanes) (Add)

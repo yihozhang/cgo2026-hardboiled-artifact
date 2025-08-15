@@ -40,7 +40,7 @@ public:
         conv(x, y) = cast<float>(0);
         conv(x, y) +=
             cast<float>(kernel(rk.x, rk.y)) *
-            cast<float>(image(scale * x + rk.x, scale * y + rk.y));
+            cast<float>(image(cast<int>(scale * x + rk.x), cast<int>(scale * y + rk.y)));
 
         output(x, y) = conv(x, y);
 
@@ -140,7 +140,7 @@ public:
                 .gpu_blocks(bx, by)
                 .tile(mmx, mmy, mmx, mmy, mmxi, mmyi, wmmaTileX, wmmaTileY)
                 .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                .unroll(mmy)
+                // .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
 
@@ -151,8 +151,9 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .reorder({mmxi, mmyi, mmx, mmy})
-                .unroll(mmx)
-                .unroll(mmy);
+                // .unroll(mmx)
+                // .unroll(mmy)
+                ;
 
             conv.update()
                 .split(y, mmy, mmyi, wmmaTileY)
@@ -164,11 +165,12 @@ public:
                 .vectorize(mmxi)
                 .vectorize(mmyi)
                 .vectorize(rkxi)
-                .unroll(rkyi)
-                .unroll(rkxo)
-                .unroll(rkyo)
-                .unroll(mmx)
-                .unroll(mmy);
+                // .unroll(rkyi)
+                // .unroll(rkxo)
+                // .unroll(rkyo)
+                // .unroll(mmx)
+                // .unroll(mmy)
+                ;
         }
     }
 
