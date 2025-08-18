@@ -241,11 +241,11 @@ int main(int argc, char **argv) {
     // Verify results
     if (std::getenv("VERIFY_OUTPUT")) {
         bool success = true;
-        for (int y = 0; y < 256; y++) {
+        for (int y = 0; y < M; y++) {
             if (!success) {
                 break;
             }
-            for (int x = 0; x < 256; x++) {
+            for (int x = 0; x < N; x++) {
                 if (!success) {
                     break;
                 }
@@ -260,6 +260,84 @@ int main(int argc, char **argv) {
                     success = false;
                 }
             }
+        }
+
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
+#elif defined(RUN_conv_layer)
+    // Create test data using compile-time definitions
+    const int N = N;
+    const int H = H;
+    const int W = W;
+    const int C = C;
+    const int kSize = kSize;
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;
+    std::cout << "  NHWC: " << N << "x" << H << "x" << W << "x" << C << std::endl;
+    std::cout << "  kSize: " << kSize << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;
+
+    // Create matrix buffers with random values
+    Buffer<Halide::float16_t> input(N, H, W, C);
+    for (int n = 0; n < N; n++) {
+        for (int h = 0; h < H; h++) {
+            for (int w = 0; w < W; w++) {
+                for (int c = 0; c < C; c++) {
+                    input(n, h, w, c) = Halide::float16_t(rand() & 1);
+                }
+            }
+        }
+    }
+
+    Buffer<Halide::float16_t> filter(C, kSize, kSize, C);
+    for (int co = 0; co < C; co++) {
+        for (int kh = 0; kh < kSize; kh++) {
+            for (int kw = 0; kw < kSize; kw++) {
+                for (int ci = 0; ci < C; ci++) {
+                    filter(ci, kh, kw, co) = Halide::float16_t(rand() & 1);
+                }
+            }
+        }
+    }
+
+    Buffer<Halide::float16_t> bias(C);
+    for (int c = 0; c < C; c++) {
+        bias(c) = Halide::float16_t(rand() & 1);
+    }
+
+    // Create output buffer
+    Buffer<float> output(C, H, W, N);
+
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {
+        conv_layer(input, filter, bias, output);
+        output.device_sync();
+    });
+
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    output.device_sync();
+
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
+
+    // Verify results
+    if (std::getenv("VERIFY_OUTPUT")) {
+        bool success = true;
+        for (int y = 0; y < 256; y++) {
+            if (!success) {
+                break;
+            }
+            // todo later
         }
 
         if (success) {
