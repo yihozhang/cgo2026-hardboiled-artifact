@@ -1,5 +1,7 @@
 #include "Halide.h"
 
+#include "common.h"
+
 namespace {
 
 using namespace Halide;
@@ -44,20 +46,22 @@ public:
         // do the same and ask Halide to compile for this specific
         // size:
 
-        output.dim(0).set_bounds(0, C).set_stride(1);
-        output.dim(1).set_bounds(0, W).set_stride(C);
-        output.dim(2).set_bounds(0, H).set_stride(C * W);
-        output.dim(3).set_bounds(0, N).set_stride(C * H * W);
+        int _C = C, _H = H, _W = W, _N = N, _kSize = kSize;
+
+        output.dim(0).set_bounds(0, _C).set_stride(1);
+        output.dim(1).set_bounds(0, _W).set_stride(_C);
+        output.dim(2).set_bounds(0, _H).set_stride(_C * _W);
+        output.dim(3).set_bounds(0, _N).set_stride(_C * _H * _W);
 
         input.dim(0).set_bounds(0, C).set_stride(1);
-        input.dim(1).set_bounds(0, W).set_stride(C);
-        input.dim(2).set_bounds(0, H).set_stride(C * W);
-        input.dim(3).set_bounds(0, N).set_stride(C * W * H);
+        input.dim(1).set_bounds(0, _W).set_stride(_C);
+        input.dim(2).set_bounds(0, _H).set_stride(_C * _W);
+        input.dim(3).set_bounds(0, _N).set_stride(_C * _W * _H);
 
         filter.dim(0).set_bounds(0, C).set_stride(1);
-        filter.dim(1).set_bounds(0, 3).set_stride(C);
-        filter.dim(2).set_bounds(0, 3).set_stride(C * kSize);
-        filter.dim(3).set_bounds(0, C).set_stride(C * kSize * kSize);
+        filter.dim(1).set_bounds(0, 3).set_stride(_C);
+        filter.dim(2).set_bounds(0, 3).set_stride(_C * _kSize);
+        filter.dim(3).set_bounds(0, _C).set_stride(_C * _kSize * _kSize);
 
         bias.dim(0).set_bounds(0, C).set_stride(1);
 
@@ -88,7 +92,7 @@ public:
                 .fuse(co, n, t)
                 .gpu_blocks(xo, yo, t);
 
-            conv.compute_at(relu, xo)
+            conv.compute_at(output, xo)
                 .store_in(MemoryType::Register)
                 .gpu_lanes(c)
                 .unroll(x)
@@ -119,10 +123,10 @@ public:
     }
 
 private:
-    Var x("x"), y("y"), c("c"), n("n");
+    Var x{"x"}, y{"y"}, c{"c"}, n{"n"};
 
-    Func conv("conv");
-    Func relu("relu");
+    Func conv{"conv"};
+    Func relu{"relu"};
     
     RDom rk;
 };

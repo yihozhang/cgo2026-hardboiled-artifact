@@ -57,9 +57,9 @@ add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_80)
 
-add_conv_library(conv_layer_lib conv_layer host-cuda-cuda_capability_80)
-add_conv_library(conv_layer_lib_win conv_layer x86-64-windows-cuda-cuda_capability_80)
-add_conv_library(conv_layer_lib_linux conv_layer x86-64-linux-cuda-cuda_capability_80)
+add_nnl_library(conv_layer_lib conv_layer host-cuda-cuda_capability_80)
+add_nnl_library(conv_layer_lib_win conv_layer x86-64-windows-cuda-cuda_capability_80)
+add_nnl_library(conv_layer_lib_linux conv_layer x86-64-linux-cuda-cuda_capability_80)
 
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
