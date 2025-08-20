@@ -78,6 +78,18 @@ $(BIN)/%/s_downsample: process.cpp $(BIN)/%/s_downsample.a
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/s_downsample.h\"" -DBENCHMARK_NAME="\"s_downsample\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_s_downsample
 
+$(GENERATOR_BIN)/rec_filter.generator: rec_filter_generator.cpp $(GENERATOR_DEPS)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ $(LIBHALIDE_LDFLAGS)
+
+.PRECIOUS: $(BIN)/%/rec_filter.a
+$(BIN)/%/rec_filter.a: $(GENERATOR_BIN)/rec_filter.generator
+	@mkdir -p $(@D)
+	$^ -g rec_filter -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f rec_filter target=$(HL_TARGET) gpu_schedule=$* 
+
+$(BIN)/%/rec_filter: process.cpp $(BIN)/%/rec_filter.a 
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/rec_filter.h\"" -DBENCHMARK_NAME="\"rec_filter\"" -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_rec_filter
 
 $(GENERATOR_BIN)/matmul.generator: matmul_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)

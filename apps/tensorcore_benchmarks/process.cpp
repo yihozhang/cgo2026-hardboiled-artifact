@@ -337,6 +337,102 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#elif defined(RUN_rec_filter)
+    // Create test data using compile-time definitions
+    const int M = IMG_COL;
+    const int N = IMG_ROW;
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;
+    std::cout << "  Image size: " << N << "x" << M << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;
+
+    // Create matrix buffers with random values
+    Buffer<uint16_t> img(M, N);
+    for (int y = 0; y < N; y++) {
+        for (int x = 0; x < M; x++) {
+            img(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+        }
+    }
+
+    img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+    // Create output buffer
+    Buffer<float> output(M, N);
+
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {
+        // NB: Hardcode the coefficients for now
+        rec_filter(img.raw_buffer(), 0, 1.8, -0.9, output.raw_buffer());
+        output.device_sync();
+    });
+
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    output.device_sync();
+
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
+
+    {
+        int delay_factor = 16;
+        int order = 2;
+        float a[] = {0, 2, -1};
+        float a1[3][17] = {0.f};
+
+
+        a1[0][0] = 1.;
+        for (int o = 0; o < order; o++) {
+            for (int i = 1; i <= delay_factor; i++) {
+                for (int j = 1; j <= i; j++) {
+                    if (j + o <= order) {
+                        a1[o][i] += a1[0][i - j] * a[j + o];
+                    }
+                }
+            }
+        }
+        for (int o = 0; o < order; o++) {
+            for (int i = 0; i <= delay_factor; i++) {
+                std::cout << std::setprecision(2) << a1[o][i] << " ";
+            }
+            std::cout << "\n";
+        }
+    }
+
+    // Verify results
+    if (VERIFY_OUTPUT) {
+        float expected[256][256] = {0.f};
+        bool success = true;
+        for (int y = 0; y < 256; y++) {
+            if (!success) {
+                break;
+            }
+            for (int x = 0; x < 256; x++) {
+                // if (!success) {
+                //     break;
+                // }
+                expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
+                    (x > 0 ? expected[x-1][y] * 1.8 : 0.f) + 
+                    (x > 1 ? expected[x-2][y] * -0.9 : 0.f);
+                if (fabs(expected[x][y] - output(x, y)) > 0.001f) {
+                    std::cerr << "Error at (" << x << ", " << y << "): "
+                              << std::fixed << std::setprecision(10)
+                              << output(x, y) << " != " << expected[x][y] << "\n";
+                    success = false;
+                }
+            }
+        }
+
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
 #else
 #error "Unknown benchmark type"
 #endif
