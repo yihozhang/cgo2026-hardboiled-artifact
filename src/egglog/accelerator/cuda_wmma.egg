@@ -55,6 +55,17 @@
         (WMMAShape e rows cols)
     ))
 
+(rule (
+        (= e (Load (Float bits _lanes) (V tile-name) load-index))
+        
+        (WMMAAllocation tile-name n-lanes m-lanes)
+        
+        (= load-index (Ramp tile-base (IntImm32 1) tot-lanes))
+        (= tot-lanes (* n-lanes m-lanes))
+    ) (
+        (WMMAShape e n-lanes m-lanes)
+    ))
+
 ;; Axiomatic rules about WMMA2Mem and Mem2WMMA
 
 (birewrite (Cast ty (WMMA2Mem e)) (WMMA2Mem (Cast ty e)))
@@ -64,6 +75,16 @@
 (birewrite (Broadcast (Mem2WMMA e) l) (Mem2WMMA (Broadcast e l)))
 (birewrite (WMMA2Mem (Broadcast e l)) (Broadcast (WMMA2Mem e) l))
 
+;; Allow performing uniform element-wise operations directly on WMMA tiles
+
+(rule (
+        (= e (Bop (Max) e1 (WMMA2Mem e2)))
+        (WMMAShape e2 rows cols)
+    ) (
+        (let e_new (Bop (Max) e1 e2))
+        (WMMAShape e_new rows cols)
+        (union e (WMMA2Mem e_new))
+    ))
 
 (relation wmma-f16-rhs (
     Expr ;; orig-expr
@@ -241,6 +262,25 @@
                 (vec-of (Var (Handle 1) (V store-name))
                     tile
                     store-base
+                    (IntImm32 m-lanes)
+                ))))
+    (union s new-s)
+))
+
+(rule (
+    (= s (Store store-name (WMMA2Mem wmma-expr) store-index))
+    (= wmma-expr (Bop (Max) e1 e2))
+    
+    (has-type wmma-expr (Float bits 256))
+    (WMMAShape wmma-expr n-lanes m-lanes)
+
+    (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
+) (
+    (let new-s (Evaluate
+            (Call intrinsic (Int 32 1)
+                (vec-of (Var (Handle 1) (V store-name))
+                    wmma-expr
+                    store-index
                     (IntImm32 m-lanes)
                 ))))
     (union s new-s)
