@@ -1563,6 +1563,7 @@ class EnforceWMMALanes : public IRMutator {
 
 protected:
     bool wmma_used = false;
+    bool inside_wmma_expr = false;
 
     Stmt visit(const Allocate *op) override {
         if (op->memory_type == MemoryType::WMMAAccumulator || op->memory_type == MemoryType::WMMAB || op->memory_type == MemoryType::WMMAA) {
@@ -1622,6 +1623,26 @@ protected:
             if (starts_with(op->name, "wmma.store.d.sync.aligned.")) {
                 wmma_used = true;
             }
+            inside_wmma_expr = true;
+            Expr store_e = mutate(op->args[1]);
+            inside_wmma_expr = false;
+            return Call::make(
+                intrinsic_types[op->name],
+                op->name,
+                {mutate(op->args[0]), store_e, mutate(op->args[2]), mutate(op->args[3])},
+                op->call_type,
+                op->func,
+                op->value_index,
+                op->image,
+                op->param);
+        }
+    }
+
+    Expr visit(const Broadcast *op) override {
+        internal_assert(op->type.lanes() % 32 == 0);
+        if (inside_wmma_expr) {
+            return Broadcast::make(op->value, op->lanes / 32);
+        } else {
             return IRMutator::visit(op);
         }
     }
