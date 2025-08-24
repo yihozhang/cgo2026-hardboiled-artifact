@@ -15,9 +15,9 @@ public:
     }};
 
     GeneratorParam<int> N{"N", 128};
-    GeneratorParam<int> H{"H", 56};
-    GeneratorParam<int> W{"W", 56};
-    GeneratorParam<int> C{"C", 128};
+    GeneratorParam<int> H{"H", 64};
+    GeneratorParam<int> W{"W", 64};
+    GeneratorParam<int> C{"C", 16};
     GeneratorParam<int> kSize{"kSize", 3};
 
     // Inputs
@@ -117,8 +117,43 @@ public:
                 .unroll(xo)
                 .unroll(_2);
 
-        } else {
-            // todo later
+        } 
+        else if (gpu_schedule == Schedule::TensorCore) {
+            Var xo("xo"), yo("yo"), co("co"), xi("xi"), yi("yi"), ci("ci"), t("t");
+            RVar rkxo("rkxo"), rkxi("rkxi"), rtile("rtile");
+            const int tile_w = 16, tile_h = 1, tile_c = 16;
+
+            output
+                //.tile(x, y, xi, yi, tile_w, tile_h)
+                .split(x, x, xi, tile_w)
+                //.split(c, co, ci, tile_c)
+                //.reorder(ci, co, xi, yi, x, y, n)
+                .reorder(c, xi, x, y, n)
+                .gpu_blocks(x, y, n)
+                //.gpu_threads(xi, yi)
+                .vectorize(c)
+                .vectorize(xi)
+                ;
+            
+            conv.compute_at(output, x)
+                .store_in(MemoryType::WMMAAccumulator)
+                .vectorize(c)
+                .unroll(x)
+                .unroll(y)
+                ;
+
+            conv.update()
+                .split(rk.x, rkxo, rkxi, 16)
+                .split(c, co, ci, 16)
+                .reorder(rkxi, ci, x, y, co, rkxo, rk.y, rk.z)
+                //.fuse(rkxo, rk.y, rtile)
+                //.fuse(rtile, rk.z, rtile)
+                .atomic()
+                .vectorize(ci)
+                .vectorize(x)
+                .vectorize(y)
+                .vectorize(rkxi)
+                ;
         }
     }
 
