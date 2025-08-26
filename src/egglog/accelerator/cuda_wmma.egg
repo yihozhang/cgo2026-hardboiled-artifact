@@ -269,10 +269,11 @@
 
 (rule (
     (= s (Store store-name (WMMA2Mem wmma-expr) store-index))
-    (= wmma-expr (Bop (Max) e1 e2))
     
     (has-type wmma-expr (Float bits 256))
     (WMMAShape wmma-expr n-lanes m-lanes)
+
+    (= store-index (Ramp store-base (IntImm32 1) tot-lanes))
 
     (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
 ) (
@@ -280,7 +281,7 @@
             (Call intrinsic (Int 32 1)
                 (vec-of (Var (Handle 1) (V store-name))
                     wmma-expr
-                    store-index
+                    store-base
                     (IntImm32 m-lanes)
                 ))))
     (union s new-s)

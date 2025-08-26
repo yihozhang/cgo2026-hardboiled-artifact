@@ -1181,12 +1181,6 @@ struct SubstStores : public EqSatIRMutator {
             }
         };
 
-        debug(0) << "Pending definitions:\n"
-                 << pending_definitions.size() << "\n";
-        for (auto &pending_definition : pending_definitions) {
-            debug(0) << "Pending definition: " << pending_definition.name << " " << pending_definition.expr << "\n";
-        }
-
         InsertPendingDefinition ipd(out);
 
         auto pd_it = pending_definitions.begin();
@@ -1622,25 +1616,28 @@ protected:
         } else {
             if (starts_with(op->name, "wmma.store.d.sync.aligned.")) {
                 wmma_used = true;
+                
+                inside_wmma_expr = true;
+                Expr store_val = mutate(op->args[1]);
+                inside_wmma_expr = false;
+
+                return Call::make(
+                    op->type,
+                    op->name,
+                    {mutate(op->args[0]), store_val, mutate(op->args[2]), mutate(op->args[3])},
+                    op->call_type,
+                    op->func,
+                    op->value_index,
+                    op->image,
+                    op->param);
             }
-            inside_wmma_expr = true;
-            Expr store_e = mutate(op->args[1]);
-            inside_wmma_expr = false;
-            return Call::make(
-                intrinsic_types[op->name],
-                op->name,
-                {mutate(op->args[0]), store_e, mutate(op->args[2]), mutate(op->args[3])},
-                op->call_type,
-                op->func,
-                op->value_index,
-                op->image,
-                op->param);
+            return IRMutator::visit(op);
         }
     }
 
     Expr visit(const Broadcast *op) override {
-        internal_assert(op->type.lanes() % 32 == 0);
         if (inside_wmma_expr) {
+            internal_assert(op->type.lanes() % 32 == 0);
             return Broadcast::make(op->value, op->lanes / 32);
         } else {
             return IRMutator::visit(op);
@@ -1992,10 +1989,6 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     // post-processing
     EqSatExtensions::SubstStores subst_stores(result, std::move(new_stores));
     result = subst_stores.get_mutated_program();
-    for (auto pending_definition : subst_stores.pending_definitions) {
-        std::cerr << "pending_definition: " << pending_definition.expr << std::endl;
-    }
-    internal_assert(subst_stores.pending_definitions.empty());
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);
     result = EqSatExtensions::DesugarIntrinsics().mutate(result);
