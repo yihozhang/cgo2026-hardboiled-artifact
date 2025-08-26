@@ -98,6 +98,8 @@ public:
         kernel_y{"kernel_y"},
         kernel_sum_x{"kernel_sum_x"},
         kernel_sum_y{"kernel_sum_y"};
+    
+    Func resized{"resized"};
     Func is_empty_block{"is_empty_block"}, kernel_blocks{"kernel_blocks"};
 
     Expr inverse_scale_factor;
@@ -171,7 +173,6 @@ public:
         // Perform separable resizing. The resize in x vectorizes
         // poorly compared to the resize in y, so do it first if we're
         // upsampling, and do it second if we're downsampling.
-        Func resized;
         if (upsample) {
             resized_x(x, y, c) = sum(kernel_x(x, r) * as_float(r + beginx, y, c), "resized_x");
             resized_y(x, y, c) = sum(kernel_y(y, r) * resized_x(x, r + beginy, c), "resized_y");
@@ -210,12 +211,12 @@ public:
             
             // rx = {0, input.dim(0).extent(), 0, input.dim(0).extent(), "rx"};
             rx = {0, input.dim(0).extent(), "rx"};
-            // rx.where(is_empty_block(x / block_size, rx / block_size));
-            resized_x(x, y, c) = 0.f;
-            // resized_x(rx.x, y, c) += cast<float>(kernel_blocks(rx.x % block_size, rx.y % block_size, rx.x / block_size, rx.y / block_size)) * cast<float>(resized_y(rx.y, y, c));
-            resized_x(x, y, c) += cast<float>(kernel_blocks(x, rx.x)) * cast<float>(resized_y(rx.x, y, c));
+            rx.where(is_empty_block(xo, rx / block_size));
+            resized_x(xi, yi, xo, yo, c) = 0.f;
+            resized_x(xi, yi, xo, yo, c) += cast<float>(kernel_blocks(xi + xo * block_size, rx.x)) * cast<float>(resized_y(rx.x, yi + yo * block_size, c));
 
-            resized = resized_x;
+            resized(x, y, c) = resized_x(x % block_size, y % block_size, x / block_size, y / block_size, c);
+            // resized = resized_x;
         }
 
         if (input.type().is_float()) {
@@ -279,76 +280,26 @@ public:
             RVar rxi("rxi"), rxo("rxo"), ryi("ryi"), ryo("ryo");
             resized_x
                 .in()
-                .compute_root()
-                .tile(x, y, xi, yi, block_size, block_size
-                    // TailStrategy::GuardWithIf
-                )
-                .reorder(xi, yi, x, y, c);
+                .compute_at(output, x)
+                .reorder(xi, yi, xo, yo, c);
             resized_x
-                // .compute_at(output, xi)
-                // .compute_root()
-                .compute_at(resized_x.in(), x)
-                // .store_in(MemoryType::WMMAAccumulator)
-                .tile(x, y, xi, yi, 16, 16)
-                .reorder(xi, yi, x, y, c)
+                .compute_at(resized_x.in(), xo)
                 .vectorize(yi, 16)
                 .vectorize(xi, 16)
                 .update()
-                // .tile(rx.x, rx.y, rxo, ryo, rxi, ryi, block_size, block_size)
                 .split(rx.x, rxo, rxi, block_size)
-                .split(y, yo, yi, block_size)
-                .split(x, xo, xi, block_size)
-                // .split(r, ro, ri, 16)
                 .reorder(rxi, xi, yi, rxo, xo, yo, c)
                 .atomic()
-                // .vectorize(rxi, 16)
                 .vectorize(rxi)
                 .vectorize(xi)
                 .vectorize(yi);
-                // .unroll(c)
-                ;
-            // kernel_blocks.compute_at(resized_x, yi);
-            kernel_blocks.compute_root();
+
+            kernel_blocks.compute_at(resized_x, rxo);
         }
 
         output.dim(0).set_stride(1);
         output.dim(0).set_min(0);
         input.dim(0).set_stride(1);
-        // Allow the input and output to have arbitrary memory layout,
-        // and add some specializations for a few common cases. If
-        // your case is not covered (e.g. planar input, packed rgb
-        // output), you could add a new specialization here.
-        // output.dim(0).set_stride(Expr());
-        // input.dim(0).set_stride(Expr());
-
-        // Expr planar = (output.dim(0).stride() == 1 &&
-        //                input.dim(0).stride() == 1);
-        // Expr packed_rgb = (output.dim(0).stride() == 3 &&
-        //                    output.dim(2).stride() == 1 &&
-        //                    output.dim(2).min() == 0 &&
-        //                    output.dim(2).extent() == 3 &&
-        //                    input.dim(0).stride() == 3 &&
-        //                    input.dim(2).stride() == 1 &&
-        //                    input.dim(2).min() == 0 &&
-        //                    input.dim(2).extent() == 3);
-        // Expr packed_rgba = (output.dim(0).stride() == 4 &&
-        //                     output.dim(2).stride() == 1 &&
-        //                     output.dim(2).min() == 0 &&
-        //                     output.dim(2).extent() == 4 &&
-        //                     input.dim(0).stride() == 4 &&
-        //                     input.dim(2).stride() == 1 &&
-        //                     input.dim(2).min() == 0 &&
-        //                     input.dim(2).extent() == 4);
-
-        // output.specialize(planar);
-
-        // output.specialize(packed_rgb)
-        //     .reorder(c, xi, yi, x, y)
-        //     .unroll(c);
-
-        // output.specialize(packed_rgba)
-        //     .reorder(c, xi, yi, x, y)
-        //     .unroll(c);
     }
 };
 
