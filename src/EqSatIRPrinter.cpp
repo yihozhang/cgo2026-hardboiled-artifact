@@ -151,7 +151,7 @@ void EqSatIRPrinter::visit(const Broadcast *e) {
 
 void EqSatIRPrinter::visit(const Call *e) {
     // (Call fn type (vec-of args...))
-    stream << "(Call " << e->name << " ";
+    stream << "(Call \"" << e->name << "\" ";
     print_type(e->type);
     stream << " (vec-of";
 
