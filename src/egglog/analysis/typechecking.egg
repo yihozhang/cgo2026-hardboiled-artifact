@@ -52,7 +52,7 @@
     ((has-type e (MultipliedLanes ty l))) :ruleset typechecking)
 (rule ((= e (Let x e1 e2))) 
     ((panic "let not supported")) :ruleset typechecking)
-(rule ((= e (Call fn out-type args))
+(rule ((= e (Call fn out-type args calltype))
 ) ((has-type e out-type)) :ruleset typechecking)
 (rule ((= e (Var ty x))) ((has-type e ty)) :ruleset typechecking)
 (rule ((= e (Shuffle VecExpr VecInt))) 

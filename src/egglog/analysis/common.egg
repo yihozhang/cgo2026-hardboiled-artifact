@@ -36,7 +36,7 @@
 (rule ((= e (Ramp _expr1 _expr2 _i64))) ((IsExpr e)))
 (rule ((= e (Broadcast _expr _i64))) ((IsExpr e)))
 (rule ((= e (Let _string _expr1 _expr2))) ((IsExpr e)))
-(rule ((= e (Call _string _type _vecexpr))) ((IsExpr e)))
+(rule ((= e (Call _string _type _vecexpr _calltype))) ((IsExpr e)))
 (rule ((= e (Var _type _string))) ((IsExpr e)))
 (rule ((= e (Shuffle _vecexpr _vecint))) ((IsExpr e)))
 (rule ((= e (VectorReduce _type _binop _expr))) ((IsExpr e)))

@@ -159,7 +159,25 @@ void EqSatIRPrinter::visit(const Call *e) {
         stream << " ";
         arg.accept(this);
     }
-    stream << "))";
+    stream << ") ";
+    if (e->call_type == Call::Image) {
+        stream << "(Image)";
+    } else if (e->call_type == Call::Extern) {
+        stream << "(Extern)";
+    } else if (e->call_type == Call::ExternCPlusPlus) {
+        stream << "(ExternCPlusPlus)";
+    } else if (e->call_type == Call::PureExtern) {
+        stream << "(PureExtern)";
+    } else if (e->call_type == Call::Halide) {
+        stream << "(Halide)";
+    } else if (e->call_type == Call::Intrinsic) {
+        stream << "(Intrinsic)";
+    } else if (e->call_type == Call::PureIntrinsic) {
+        stream << "(PureIntrinsic)";
+    } else {
+        internal_error << "Unknown CallType";
+    }    
+    stream << ")";
 }
 
 void EqSatIRPrinter::visit(const Let *e) {

@@ -65,7 +65,8 @@ Expr EqSatIRParser::parse_expr() {
         auto name = parse_str();
         auto type = parse_type();
         auto args = parse_vec_expr();
-        result = Call::make(type, name, args, Call::Intrinsic);
+        auto call_type = parse_call_type();
+        result = Call::make(type, name, args, call_type);
     } else if (is_head("Var")) {
         auto type = parse_type();
         auto name = parse_var();
@@ -215,6 +216,30 @@ std::vector<Expr> EqSatIRParser::parse_vec_expr() {
         result.push_back(parse_expr());
     }
     return result;
+}
+
+Call::CallType EqSatIRParser::parse_call_type() {
+    expect('(');
+    Call::CallType call_type;
+    if (is_head("Image")) {
+        call_type = Call::Image;
+    } else if (is_head("Extern")) {
+        call_type = Call::Extern;
+    } else if (is_head("ExternCPlusPlus")) {
+        call_type = Call::ExternCPlusPlus;
+    } else if (is_head("PureExtern")) {
+        call_type = Call::PureExtern;
+    } else if (is_head("Halide")) {
+        call_type = Call::Halide;
+    } else if (is_head("Intrinsic")) {
+        call_type = Call::Intrinsic;
+    } else if (is_head("PureIntrinsic")) {
+        call_type = Call::PureIntrinsic;
+    } else {
+        internal_error << "Unknown CallType";
+    }
+    expect(')');
+    return call_type;
 }
 
 Stmt EqSatIRParser::parse_stmt() {

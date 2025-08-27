@@ -90,7 +90,7 @@
     (= tile (Tile x-lanes y-lanes r-lanes))
     (WMMATileB tile wmma-intrinsic)
 ) (
-    (let new-rhs (Call wmma-intrinsic (Float 16 256) (vec-of (Var (Handle 1) rhs-name) rhs-base rhs-r-stride)))
+    (let new-rhs (Call wmma-intrinsic (Float 16 256) (vec-of (Var (Handle 1) rhs-name) rhs-base rhs-r-stride) (Intrinsic)))
     (wmma-f16-rhs rhs tile new-rhs)
 ))
 
@@ -139,9 +139,9 @@
         (WMMAGEMM tile intrinsic-GEMM acc-bits)
 
     ) (
-        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
+        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
         (let new-mat (Mem2WMMA mat))
-        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs new-mat)))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs new-mat) (Intrinsic)))
         (WMMAShape new-e x-lanes y-lanes)
 
         (union e (WMMA2Mem new-e))
@@ -172,9 +172,9 @@
         (WMMATileC tile intrinsic-C acc-bits)
 
     ) (
-        (let initial (Call (+ intrinsic-C ".ZERO") (Float acc-bits 256) (vec-of (IntImm32 0))))
-        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride)))
-        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs initial)))
+        (let initial (Call (+ intrinsic-C ".ZERO") (Float acc-bits 256) (vec-of (IntImm32 0)) (Intrinsic)))
+        (let new-lhs (Call intrinsic-A (Float 16 256) (vec-of (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
+        (let new-e (Call intrinsic-GEMM (Float acc-bits 256) (vec-of new-lhs new-rhs initial) (Intrinsic)))
         (WMMAShape new-e x-lanes y-lanes)
         (union e (WMMA2Mem new-e))
     ))
@@ -191,7 +191,7 @@
 
         (WMMATileC (Tile rows cols _k) intrinsic bits)
     ) (
-        (let new-e (Call (+ intrinsic ".ZERO") (Float bits lanes) (vec-of (IntImm32 0))))
+        (let new-e (Call (+ intrinsic ".ZERO") (Float bits lanes) (vec-of (IntImm32 0)) (Intrinsic)))
         ; (let new-e (Call intrinsic (Float 32 lanes) (vec-of (Var (Handle 1) (ExprVar (Mem) 
         (union e new-e)
     ))
@@ -203,7 +203,7 @@
     (WMMATileD (Tile n-lanes _m k-lanes) intrinsic bits)
 ) (
     (let load-var (ExprVar (Mem)
-        (Call intrinsic (Int 32 1) (vec-of (Var (Handle 1) (V "DUMMY_STORE_NAME")) wmma-expr (IntImm32 0) (IntImm32 k-lanes)))))
+        (Call intrinsic (Int 32 1) (vec-of (Var (Handle 1) (V "DUMMY_STORE_NAME")) wmma-expr (IntImm32 0) (IntImm32 k-lanes)) (Intrinsic))))
     (let index (Ramp (Ramp (IntImm32 0) (IntImm32 1) k-lanes) (Broadcast (IntImm32 k-lanes) k-lanes) n-lanes))
     (let new-e (Load (Float bits (* n-lanes k-lanes)) load-var index))
     (union e new-e)
@@ -222,7 +222,8 @@
                         tile
                         base
                         n-stride
-                    ))))
+                    )
+                    (Intrinsic))))
         (union s new-s)
     ))
 
@@ -242,7 +243,8 @@
                     tile
                     store-base
                     (IntImm32 m-lanes)
-                ))))
+                )
+                (Intrinsic))))
     (union s new-s)
 ))
 
@@ -257,7 +259,7 @@
 
     (WMMATileB (Tile _l m-lanes n-lanes) wmma-intrinsic)
 ) (
-    (let new-e (Call wmma-intrinsic ty (vec-of (Var (Handle 1) name) base n-stride)))
+    (let new-e (Call wmma-intrinsic ty (vec-of (Var (Handle 1) name) base n-stride) (Intrinsic)))
     (union e new-e)
 ))
 
@@ -315,7 +317,8 @@
     (let new-rhs-name
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2) (IntImm32 1) (IntImm32 0)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 l2) (IntImm32 1) (IntImm32 0))
+                (Intrinsic))
         )
     )
     (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
@@ -382,7 +385,8 @@
     (let new-rhs-name
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 new-l2) (IntImm32 1) (IntImm32 0)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 l1) (IntImm32 new-l2) (IntImm32 1) (IntImm32 0))
+                (Intrinsic))
         )
     )
     (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
@@ -463,13 +467,15 @@
     (let new-rhs-name-1
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 0)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 0))
+                (Intrinsic))
         )
     )
     (let new-rhs-name-2
         (ExprVar (Mem)
             (Call "ConvolutionShuffle" (Float 16 (* new-l1 new-l2))
-                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 16)))
+                (vec-of (Var (Handle 1) rhs-name) br s1b (IntImm32 16) (IntImm32 8) (IntImm32 2) (IntImm32 16))
+                (Intrinsic))
         )
     )
     (let new-rhs-1 (Load (Float 16 new-tot-lanes) new-rhs-name-1 new-rhs-index))
@@ -551,7 +557,8 @@
     (let new-rhs-name
         (ExprVar (Mem)
             (Call "ConvolutionShuffle+" (Float 16 (* new-r-lanes new-x-lanes))
-                (vec-of (Var (Handle 1) rhs-name) rhs-base (IntImm32 1) (IntImm32 r-lanes) (IntImm32 r-lanes) (IntImm32 1) (IntImm32 0) x-stride (IntImm32 x-lanes)))
+                (vec-of (Var (Handle 1) rhs-name) rhs-base (IntImm32 1) (IntImm32 r-lanes) (IntImm32 r-lanes) (IntImm32 1) (IntImm32 0) x-stride (IntImm32 x-lanes))
+                (Intrinsic))
         )
     )
     (let new-rhs (Load (Float 16 new-tot-lanes) new-rhs-name new-rhs-index))
