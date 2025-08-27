@@ -10,31 +10,31 @@ schedules = ["cuda_only", "tensorcore"]
 # Define each benchmark as a dictionary with command-line flag names
 benchmarks = [
     # Conv1D
-    {"-b": "conv1d", "-conv_k": 128, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
-    {"-b": "conv1d", "-conv_k": 128, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+    #{"-b": "conv1d", "-conv_k": 128, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
+    #{"-b": "conv1d", "-conv_k": 128, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
     
     # Conv2D
-    {"-b": "conv2d", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
-    {"-b": "conv2d", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+    #{"-b": "conv2d", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
+    #{"-b": "conv2d", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
     
     # Upsample
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+    #{"-b": "upsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
+    #{"-b": "upsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
     
     # Downsample
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
-    
+    #{"-b": "downsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
+    #{"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+
+    # Matmul
+    #{"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
+    #{"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
+    #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
+
     # Conv Layer (NHWC)
     {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 16", "-v": True},
     {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 32", "-v": False},
     {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 64", "-v": False},
     {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 128", "-v": False},
-
-    # Matmul
-    {"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
-    {"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
-    {"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
