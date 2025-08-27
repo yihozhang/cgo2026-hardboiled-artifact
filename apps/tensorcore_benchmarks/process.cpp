@@ -272,11 +272,11 @@ int main(int argc, char **argv) {
     }
 #elif defined(RUN_conv_layer)
     // Create test data using compile-time definitions
-    const int N = N;
-    const int H = H;
-    const int W = W;
-    const int C = C;
-    const int kSize = kSize;
+    const int N = 128;//N;
+    const int H = 64;//H;
+    const int W = 64;//W;
+    const int C = 16;//C;
+    const int kSize = 3;//kSize;
 
     std::string benchmark_name = BENCHMARK_NAME;
 
@@ -286,10 +286,10 @@ int main(int argc, char **argv) {
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create matrix buffers with random values
-    Buffer<Halide::float16_t> input(N, H, W, C);
+    Buffer<Halide::float16_t> input(C, W+kSize, H+kSize, N);
     for (int n = 0; n < N; n++) {
-        for (int h = 0; h < H; h++) {
-            for (int w = 0; w < W; w++) {
+        for (int h = 0; h < H+kSize; h++) {
+            for (int w = 0; w < W+kSize; w++) {
                 for (int c = 0; c < C; c++) {
                     input(n, h, w, c) = Halide::float16_t(rand() & 1);
                 }
@@ -308,13 +308,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    Buffer<Halide::float16_t> bias(C);
+    Buffer<float> bias(C);
     for (int c = 0; c < C; c++) {
-        bias(c) = Halide::float16_t(rand() & 1);
+        bias(c) = float(rand() & 1);
     }
 
     // Create output buffer
-    Buffer<float> output(C, H, W, N);
+    Buffer<float> output(C, W, H, N);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {

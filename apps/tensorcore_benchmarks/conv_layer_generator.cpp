@@ -21,8 +21,8 @@ public:
     GeneratorParam<int> kSize{"kSize", 3};
 
     // Inputs
-    Input<Buffer<float, 4>> input{"input"};
-    Input<Buffer<float, 4>> filter{"filter"};
+    Input<Buffer<float16_t, 4>> input{"input"};
+    Input<Buffer<float16_t, 4>> filter{"filter"};
     Input<Buffer<float, 1>> bias{"bias"};
 
     // Output
@@ -32,7 +32,7 @@ public:
         rk = RDom(0, C, 0, kSize, 0, kSize);
 
         conv(c, x, y, n) = bias(c);
-        conv(c, x, y, n) += filter(c, rk.y, rk.z, rk.x) * input(rk.x, x + rk.y, y + rk.z, n);
+        conv(c, x, y, n) += cast<float>(filter(c, rk.y, rk.z, rk.x)) * cast<float>(input(rk.x, x + rk.y, y + rk.z, n));
 
         relu(c, x, y, n) = max(0, conv(c, x, y, n));
 
@@ -54,9 +54,9 @@ public:
         output.dim(3).set_bounds(0, _N).set_stride(_C * _H * _W);
 
         input.dim(0).set_bounds(0, C).set_stride(1);
-        input.dim(1).set_bounds(0, _W).set_stride(_C);
-        input.dim(2).set_bounds(0, _H).set_stride(_C * _W);
-        input.dim(3).set_bounds(0, _N).set_stride(_C * _W * _H);
+        input.dim(1).set_bounds(0, (_W + _kSize)).set_stride(_C);
+        input.dim(2).set_bounds(0, (_H + _kSize)).set_stride(_C * (_W + _kSize));
+        input.dim(3).set_bounds(0, _N).set_stride(_C * (_W + _kSize) * (_H + _kSize));
 
         filter.dim(0).set_bounds(0, C).set_stride(1);
         filter.dim(1).set_bounds(0, 3).set_stride(_C);
@@ -138,8 +138,9 @@ public:
             conv.compute_at(output, x)
                 .store_in(MemoryType::WMMAAccumulator)
                 .vectorize(c)
-                .unroll(x)
-                .unroll(y)
+                .vectorize(x)
+                //.unroll(x)
+                //.unroll(y)
                 ;
 
             conv.update()
@@ -153,6 +154,11 @@ public:
                 .vectorize(x)
                 .vectorize(y)
                 .vectorize(rkxi)
+                ;
+
+            //conv.update(1)
+              //  .vectorize(c)
+                //.vectorize(x)
                 ;
         }
     }

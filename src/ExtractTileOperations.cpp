@@ -1010,7 +1010,17 @@ struct InsertPendingDefinition : public EqSatIRMutator {
             body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
         } else {
             store_stmt = Store::make(pd.name, pd.expr, Ramp::make(0, 1, lanes), Parameter(), const_true(lanes), ModulusRemainder());
+            
             body = Block::make(store_stmt, body);
+
+            BufferBuilder builder;
+            builder.host = Variable::make(Handle(), pd.name);
+            builder.type = pd.type().with_lanes(1);
+            builder.dimensions = 1;
+            builder.mins.push_back(0);
+            builder.extents.push_back(lanes);
+            builder.strides.push_back(1);
+            body = LetStmt::make(pd.name + ".buffer", builder.build(), body);
             body = Allocate::make(pd.name, pd.type().with_lanes(1), MemoryType::Auto, {pd.type().lanes()}, const_true(pd.type().lanes()), body);
         }
 
