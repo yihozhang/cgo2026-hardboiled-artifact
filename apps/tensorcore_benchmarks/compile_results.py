@@ -59,6 +59,9 @@ def parse_benchmark_output(output):
     width = int(image_match.group(1)) if image_match else None
     height = int(image_match.group(2)) if image_match else None
 
+    # General input size string captured exactly as printed by the programs
+    input_size = None
+
     # Extract NHWC for conv_layer (use H and W as height/width)
     nhwc_match = re.search(r'NHWC: (\d+)x(\d+)x(\d+)x(\d+)', output)
     if nhwc_match:
@@ -68,11 +71,19 @@ def parse_benchmark_output(output):
         c = int(nhwc_match.group(4))
         width = w
         height = h
+        input_size = f"{n}x{h}x{w}x{c}"
 
     # Extract matrix size
     image_match = re.search(r'Matrix size: (\d+)x(\d+)x(\d+)', output)
-    width = int(image_match.group(1)) if image_match else width
-    height = int(image_match.group(2)) if image_match else height
+    if image_match:
+        width = int(image_match.group(1))
+        height = int(image_match.group(2))
+        input_size = f"{image_match.group(1)}x{image_match.group(2)}x{image_match.group(3)}"
+    elif input_size is None:
+        # Fall back to Image size if present
+        image_dims = re.search(r'Image size: (\d+)x(\d+)', output)
+        if image_dims:
+            input_size = f"{image_dims.group(1)}x{image_dims.group(2)}"
     
     # Extract schedule
     schedule_match = re.search(r'Schedule: (\w+)', output)
@@ -98,6 +109,7 @@ def parse_benchmark_output(output):
         'kernel_size': kernel_size,
         'width': width,
         'height': height,
+        'input_size': input_size,
         'runtime': runtime,
         'outputs_match': outputs_match
     }
@@ -106,12 +118,12 @@ def compute_speedups(results):
     # Group results by configuration (everything except schedule and runtime)
     configs = defaultdict(dict)
     for result in results:
-        key = (result['benchmark'], result['kernel_size'], result['width'], result['height'])
+        key = (result['benchmark'], result['kernel_size'], result['input_size'])
         configs[key][result['schedule']] = float(result['runtime'])
 
     # Compute speedups
     speedups = []
-    for (benchmark, ksize, width, height), runtimes in configs.items():
+    for (benchmark, ksize, input_size), runtimes in configs.items():
         if 'cuda_only' in runtimes and 'tensorcore' in runtimes:
             cuda_time = runtimes['cuda_only']
             tensor_time = runtimes['tensorcore']
@@ -119,7 +131,7 @@ def compute_speedups(results):
             speedups.append({
                 'benchmark': benchmark,
                 'kernel_size': ksize,
-                'input_size': f"{width}x{height}",
+                'input_size': input_size,
                 'cuda_time': f"{cuda_time:.9f}",
                 'tensor_time': f"{tensor_time:.9f}",
                 'speedup': f"{speedup:.2f}x"
@@ -150,8 +162,8 @@ def write_result_to_csv(result, csv_file):
     
     with open(csv_file, "a") as f:
         if not file_exists:
-            f.write("hardware,benchmark,schedule,kernel_size,width,height,runtime,outputs_match\n")
-        f.write(f"{result['hardware']},{result['benchmark']},{result['schedule']},{result['kernel_size']},{result['width']},{result['height']},{result['runtime']},{result['outputs_match']}\n")
+            f.write("hardware,benchmark,schedule,kernel_size,input_size,runtime,outputs_match\n")
+        f.write(f"{result['hardware']},{result['benchmark']},{result['schedule']},{result['kernel_size']},{result.get('input_size','')},{result['runtime']},{result['outputs_match']}\n")
 
 def write_speedup_to_csv(speedup, csv_file):
     """Write a single speedup result to the CSV file."""
@@ -217,7 +229,7 @@ def main():
             write_result_to_csv(result, raw_results_file)
             
             # Store result for speedup calculation
-            key = (result['benchmark'], result['kernel_size'], result['width'], result['height'])
+            key = (result['benchmark'], result['kernel_size'], result['input_size'])
             config_results[key][result['schedule']] = float(result['runtime'])
             
             # If we have both schedules for this config, calculate and write speedup
@@ -230,7 +242,7 @@ def main():
                     'hardware': hardware,
                     'benchmark': result['benchmark'],
                     'kernel_size': result['kernel_size'],
-                    'input_size': f"{result['width']}x{result['height']}",
+                    'input_size': result['input_size'],
                     'cuda_time': f"{cuda_time:.9f}",
                     'tensor_time': f"{tensor_time:.9f}",
                     'speedup': f"{speedup:.2f}x"
