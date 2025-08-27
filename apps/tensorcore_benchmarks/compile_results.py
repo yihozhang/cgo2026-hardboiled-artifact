@@ -31,10 +31,10 @@ benchmarks = [
     #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 
     # Conv Layer (NHWC)
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 16", "-v": True},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 32", "-v": False},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 64", "-v": False},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 128", "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 16], "-v": True},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 64], "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 128], "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -135,6 +135,9 @@ def dict_to_cmd_args(benchmark_dict):
             args.append(flag)
         elif flag == "-v" and not value:
             continue
+        elif flag == "-nhwc":
+            args.append(flag)
+            args += [str(v) for v in value]
         else:
             args.append(flag)
             args.append(str(value))
