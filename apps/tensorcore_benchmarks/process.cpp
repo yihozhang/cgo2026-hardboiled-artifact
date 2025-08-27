@@ -272,26 +272,26 @@ int main(int argc, char **argv) {
     }
 #elif defined(RUN_conv_layer)
     // Create test data using compile-time definitions
-    const int N = 128;//N;
-    const int H = 64;//H;
-    const int W = 64;//W;
-    const int C = 16;//C;
-    const int kSize = 3;//kSize;
+    const int N = NN_TENSOR_N;
+    const int H = NN_TENSOR_H;
+    const int W = NN_TENSOR_W;
+    const int C = NN_TENSOR_C;
+    const int kSize = KERNEL_SIZE;
 
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
     std::cout << "  NHWC: " << N << "x" << H << "x" << W << "x" << C << std::endl;
-    std::cout << "  kSize: " << kSize << std::endl;
+    std::cout << "  Kernel size: " << kSize << std::endl;
     std::cout << "  Schedule: " << SCHEDULE << std::endl;
 
     // Create matrix buffers with random values
-    Buffer<Halide::float16_t> input(C, W+kSize, H+kSize, N);
+    Buffer<Halide::float16_t> input(C, W + kSize, H + kSize, N);
     for (int n = 0; n < N; n++) {
-        for (int h = 0; h < H+kSize; h++) {
-            for (int w = 0; w < W+kSize; w++) {
+        for (int h = 0; h < H + kSize; h++) {
+            for (int w = 0; w < W + kSize; w++) {
                 for (int c = 0; c < C; c++) {
-                    input(n, h, w, c) = Halide::float16_t(rand() & 1);
+                    input(c, w, h, n) = Halide::float16_t(rand() & 1);
                 }
             }
         }
@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
         for (int kh = 0; kh < kSize; kh++) {
             for (int kw = 0; kw < kSize; kw++) {
                 for (int ci = 0; ci < C; ci++) {
-                    filter(ci, kh, kw, co) = Halide::float16_t(rand() & 1);
+                    filter(ci, kw, kh, co) = Halide::float16_t(rand() & 1);
                 }
             }
         }

@@ -38,6 +38,10 @@ function(add_nnl_library LIB_NAME GENERATOR_NAME TARGET_PLATFORM)
         FUNCTION_NAME ${GENERATOR_NAME}
         TARGETS ${TARGET_PLATFORM}
         PARAMS 
+            N=${NN_TENSOR_N}
+            H=${NN_TENSOR_H}
+            W=${NN_TENSOR_W}
+            C=${NN_TENSOR_C}
             gpu_schedule=${SCHEDULE}
         EXTRA_OUTPUTS assembly llvm_assembly stmt
     )

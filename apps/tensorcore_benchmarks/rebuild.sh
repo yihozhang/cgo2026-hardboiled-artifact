@@ -8,6 +8,10 @@ SCHEDULE="cuda_only"
 CONV_KERNEL_SIZE="128"
 CONV_IMG_COL="3840"
 CONV_IMG_ROW="2160"
+NN_TENSOR_N="128"
+NN_TENSOR_H="64"
+NN_TENSOR_W="64"
+NN_TENSOR_C="16"
 MATMUL_M="4096"
 MATMUL_N="4096"
 MATMUL_K="4096"
@@ -23,8 +27,9 @@ show_help() {
     echo "  -t,         --target TARGET             Target architecture (host, win, or linux) [default: host]"
     echo "  -s,         --schedule SCHEDULE         Schedule to use (cuda_only or tensorcore) [default: cuda_only]"
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
-    echo "  -conv_col,  --img-cols IMG_COL         Image width (3840) [default: 3840]"
-    echo "  -conv_row,  --img-rows IMG_ROW         Image height (2160) [default: 2160]"
+    echo "  -conv_col,  --img-cols IMG_COL          Image width (3840) [default: 3840]"
+    echo "  -conv_row,  --img-rows IMG_ROW          Image height (2160) [default: 2160]"
+    echo "  -nhwc,      --nhwc N,H,W,C            Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
     echo "  -mm_m,      --matmul-m MATMUL_M         Rows of the input matrix A [default: 4096]"
     echo "  -mm_n,      --matmul-n MATMUL_N         Columns of the input matrix B [default: 4096]"
     echo "  -mm_k,      --matmul-k MATMUL_K         Columns of the input matrix A / Rows of the input matrix B [default: 4096]"
@@ -65,6 +70,13 @@ while [[ $# -gt 0 ]]; do
         -conv_row|--img-rows)
             CONV_IMG_ROW="$2"
             shift 2
+            ;;
+        -nhwc|--nhwc)
+            NN_TENSOR_N="$2"
+            NN_TENSOR_H="$3"
+            NN_TENSOR_W="$4"
+            NN_TENSOR_C="$5"
+            shift 5
             ;;
         -mm_m|--matmul-m)
             MATMUL_M="$2"
@@ -121,6 +133,10 @@ cmake -S . -B build \
     -DCONV_KERNEL_SIZE=$CONV_KERNEL_SIZE \
     -DCONV_IMG_COL=$CONV_IMG_COL \
     -DCONV_IMG_ROW=$CONV_IMG_ROW \
+    -DNN_TENSOR_N=$NN_TENSOR_N \
+    -DNN_TENSOR_H=$NN_TENSOR_H \
+    -DNN_TENSOR_W=$NN_TENSOR_W \
+    -DNN_TENSOR_C=$NN_TENSOR_C \
     -DMATMUL_M=$MATMUL_M \
     -DMATMUL_N=$MATMUL_N \
     -DMATMUL_K=$MATMUL_K \

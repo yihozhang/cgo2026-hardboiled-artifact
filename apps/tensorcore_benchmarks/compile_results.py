@@ -25,6 +25,12 @@ benchmarks = [
     {"-b": "downsample", "-conv_k": 16, "-conv_col": 3840, "-conv_row": 2160, "-v": True},
     {"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
     
+    # Conv Layer (NHWC)
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 16", "-v": True},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 32", "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 64", "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": "128 64 64 128", "-v": False},
+
     # Matmul
     {"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
     {"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
@@ -52,6 +58,16 @@ def parse_benchmark_output(output):
     image_match = re.search(r'Image size: (\d+)x(\d+)', output)
     width = int(image_match.group(1)) if image_match else None
     height = int(image_match.group(2)) if image_match else None
+
+    # Extract NHWC for conv_layer (use H and W as height/width)
+    nhwc_match = re.search(r'NHWC: (\d+)x(\d+)x(\d+)x(\d+)', output)
+    if nhwc_match:
+        n = int(nhwc_match.group(1))
+        h = int(nhwc_match.group(2))
+        w = int(nhwc_match.group(3))
+        c = int(nhwc_match.group(4))
+        width = w
+        height = h
 
     # Extract matrix size
     image_match = re.search(r'Matrix size: (\d+)x(\d+)x(\d+)', output)

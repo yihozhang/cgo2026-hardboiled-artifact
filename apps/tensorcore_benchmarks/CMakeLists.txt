@@ -13,6 +13,12 @@ set(CONV_KERNEL_SIZE 16 CACHE STRING "Size of the convolution kernel")
 set(CONV_IMG_ROW 3840 CACHE STRING "Height of the input image")
 set(CONV_IMG_COL 2160 CACHE STRING "Width of the input image")
 
+# NHWC parameters for NN layers
+set(NN_TENSOR_N 128 CACHE STRING "Batch size (N) for NN layers")
+set(NN_TENSOR_H 64 CACHE STRING "Image height (H) for NN layers")
+set(NN_TENSOR_W 64 CACHE STRING "Image width (W) for NN layers")
+set(NN_TENSOR_C 16 CACHE STRING "Channels (C) for NN layers")
+
 # Matmul parameters
 set(MATMUL_M 4096 CACHE STRING "Rows of the input matrix A")
 set(MATMUL_N 4096 CACHE STRING "Columns of the input matrix B")
@@ -134,6 +140,11 @@ target_compile_definitions(conv_layer
     BENCHMARK_HEADER="conv_layer_lib.h"
     BENCHMARK_NAME="conv_layer"
     RUN_conv_layer
+    KERNEL_SIZE=${CONV_KERNEL_SIZE}
+    NN_TENSOR_N=${NN_TENSOR_N}
+    NN_TENSOR_H=${NN_TENSOR_H}
+    NN_TENSOR_W=${NN_TENSOR_W}
+    NN_TENSOR_C=${NN_TENSOR_C}
     SCHEDULE="${SCHEDULE}"
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
