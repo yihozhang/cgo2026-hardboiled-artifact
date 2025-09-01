@@ -361,10 +361,11 @@ int main(int argc, char **argv) {
     // Create output buffer
     Buffer<float> output(M, N);
 
+    float a = 0.9, b = -0.45;
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
         // NB: Hardcode the coefficients for now
-        rec_filter(img.raw_buffer(), 0, 1.8, -0.9, output.raw_buffer());
+        rec_filter(img.raw_buffer(), 0, a, b, output.raw_buffer());
         output.device_sync();
     });
 
@@ -393,12 +394,6 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        for (int o = 0; o < order; o++) {
-            for (int i = 0; i <= delay_factor; i++) {
-                std::cout << std::setprecision(2) << a1[o][i] << " ";
-            }
-            std::cout << "\n";
-        }
     }
 
     // Verify results
@@ -410,12 +405,12 @@ int main(int argc, char **argv) {
                 break;
             }
             for (int x = 0; x < 256; x++) {
-                // if (!success) {
-                //     break;
-                // }
+                if (!success) {
+                    break;
+                }
                 expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
-                    (x > 0 ? expected[x-1][y] * 1.8 : 0.f) + 
-                    (x > 1 ? expected[x-2][y] * -0.9 : 0.f);
+                    (x > 0 ? expected[x-1][y] * a : 0.f) + 
+                    (x > 1 ? expected[x-2][y] * b : 0.f);
                 if (fabs(expected[x][y] - output(x, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
@@ -433,9 +428,150 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#elif defined(RUN_resize)
+    // Create test data using compile-time definitions
+    const int M = IMG_COL;
+    const int N = IMG_ROW;
+    const vector<float> scales = {0.75, 1.5};
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;
+    std::cout << "  Image size: " << N << "x" << M << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;
+
+    for (const int scale: scales) {
+        std::cout << "  scale: " << scale << std::endl;
+        
+        const int OM = M * scale;
+        const int ON = N * scale;
+
+        // Create matrix buffers with random values
+        Buffer<float> img(M, N);
+        for (int y = 0; y < N; y++) {
+            for (int x = 0; x < M; x++) {
+                img(x, y) = float(rand() & 1);
+            }
+        }
+        Buffer<float> output(OM, ON);
+    }
+
+    
+
+    float a = 0.9, b = -0.45;
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {
+        // NB: Hardcode the coefficients for now
+        rec_filter(img.raw_buffer(), 0, a, b, output.raw_buffer());
+        output.device_sync();
+    });
+
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    output.device_sync();
 #else
 #error "Unknown benchmark type"
 #endif
 
     return 0;
+}
+
+float lanczos(float x) {
+    float value = sinc(x) * sinc(x / 3);
+    value = x == 0.0f ? 1.0f : value;        // Take care of singularity at zero
+    value = (x > 3 || x < -3) ? 0.0f : value;  // Clamp to zero out of bounds
+    return value;
+}
+
+float clamp(float x, float l, float h) {
+    return min(max(x, l), h);
+}
+
+#define FOR(i, N) for (int i = 0; i < (N); i++)
+void resize_sim(float* output, float* input, int m, int n, int C, float scale) {
+    const int taps = 6;
+    bool upsample = scale > 1.0f;
+
+    float inverse_scale_factor = 1.0f / scale_factor;
+
+    float kernel_scaling = upsample ? Expr(1.0f) : scale_factor;
+    float inverse_kernel_scaling = upsample ? Expr(1.0f) : inverse_scale_factor;
+
+    float kernel_radius = 0.5f * taps * inverse_kernel_scaling;
+
+    int kernel_taps = int(ceil(taps * inverse_kernel_scaling));
+
+    int resized_m = int(ceil(m * scale));
+    int resized_n = int(ceil(n * scale));
+
+    float* kernel_x = new float[kernel_taps * resized_m];
+    float* kernel_y = new float[kernel_taps * resized_n];
+
+    FOR (x, resized_m) {
+        float sum = 0.f;
+        FOR (k, kernel_taps) {
+            float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
+            int beginx = int(ceil(sourcex - kernel_radius));
+            beginx = clamp(beginx, 0, m + 1 - kernel_taps);
+            kernel_x[x * kernel_taps + k] = lanczos((k + beginx - sourcex) * kernel_scaling);
+            sum += kernel_x[x * kernel_taps + k];
+        }
+        FOR (k, kernel_taps) {
+            kernel_x[x * kernel_taps + k] /= sum;
+        }
+    }
+
+    FOR (y, resized_n) {
+        float sum = 0.f;
+        FOR (k, kernel_taps) {
+            float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
+            int beginy = int(ceil(sourcey - kernel_radius));
+            beginy = clamp(beginy, 0, n + 1 - kernel_taps);
+            kernel_y[y * kernel_taps + k] = lanczos((k + beginy - sourcey) * kernel_scaling);
+            sum += kernel_y[y * kernel_taps + k];
+        }
+        FOR (k, kernel_taps) {
+            kernel_y[y * kernel_taps + k] /= sum;
+        }
+    }
+
+    float* resized_x = new float[resized_m * n * c];
+    FOR (c, C) {
+        FOR (y, n) {
+            FOR (x, resized_m) {
+                resized_x[c * n * resized_m + y * resized_m + x] = 0.f;
+                FOR (r, kernel_taps) {
+                    float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
+                    int beginx = int(ceil(sourcex - kernel_radius));
+                    beginx = clamp(beginx, 0, m + 1 - kernel_taps);
+                    resized_x[c * n * resized_m + y * resized_m + x] += 
+                        kernel_x[x * kernel_taps + r] * 
+                        input[c * n * m + y * m + r + beginx];
+                }
+            }
+        }
+    }
+
+    
+    FOR (c, C) {
+        FOR (y, resized_n) {
+            FOR (x, resized_m) {
+                output[c * resized_n * resized_m + y * resized_m + x] = 0.f;
+                FOR (r, kernel_taps) {
+                    float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
+                    int beginy = int(ceil(sourcey - kernel_radius));
+                    beginy = clamp(beginy, 0, n + 1 - kernel_taps);
+                    output[c * resized_n * resized_m + y * resized_m + x] += 
+                        kernel_y[y * kernel_taps + r] * 
+                        resized_x[c * n * resized_m + (beginy + r) * resized_m + x];
+                }
+            }
+        }
+    }
+
+    delete[] kernel_x;
+    delete[] kernel_y;
+    delete[] resized_x;
 }

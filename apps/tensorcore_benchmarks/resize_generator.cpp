@@ -103,8 +103,8 @@ public:
         kernel_sum_y{"kernel_sum_y"};
     
     Func resized{"resized"};
-    Func is_empty_block_x{"is_empty_block"}, kernel_blocks_x{"kernel_blocks"};
-    Func is_empty_block_y{"is_empty_block"}, kernel_blocks_y{"kernel_blocks"};
+    Func is_empty_block_x{"is_empty_block_x"}, kernel_blocks_x{"kernel_blocks_x"};
+    Func is_empty_block_y{"is_empty_block_y"}, kernel_blocks_y{"kernel_blocks_y"};
 
     Expr inverse_scale_factor;
     Expr kernel_scaling;
@@ -188,9 +188,14 @@ public:
             // ------------------------------------------------
 
             // For a block to be non-empty, intervals [16x, 16x+15] and [begin(16y), begin(16y+15)+taps] need to intersect
+            // begin(x) / 16
             is_empty_block_y(x, y) = 
                 (x * block_size <= begin_of(block_size * y + block_size - 1) + kernel_taps) && 
                 begin_of(block_size * y) <= x * block_size + block_size - 1;
+
+            // for y by 16
+            //    start_x = floor(begin(y) / 16)
+            //    end_x  = floor(begin(y + 15) / 16) + (ceil(kernel_width / 16) + 1)
 
             // xi and xo denote rows of the band kernel matrix
             /*-------------------
@@ -287,8 +292,8 @@ public:
             .vectorize(y);
         kernel_y
             // TODO: for debugging
-            // .compute_at(output, y)
-            .compute_root()
+            .compute_at(output, y)
+            // .compute_root()
             .reorder(k, y)
             .vectorize(y, vec);
 
@@ -314,12 +319,38 @@ public:
                 // zi correspond to two 16-element contiguous vectors
                 .reorder(zo, zi, x, y, c)
                 .gpu_threads(zi)
-                .gpu_blocks(c, y, x);
+                .gpu_blocks(c, y);
             output.specialize_fail("we assume image width is divisible by 16");
 
-            // resized_y.compute_at(resized_y.in(), );
+            as_float.compute_at(output, y);
+            kernel_blocks_y.compute_at(resized_y, ry.y)
+                .fuse(xi, yi, z)
+                .split(z, zo, zi, 32)
+                // zi correspond to two 16-element contiguous vectors
+                .reorder(zo, zi)
+                .gpu_threads(zi);
+
+            resized_y
+                .in()
+                .compute_at(output, y)
+                .vectorize(xi, 16)
+                .vectorize(yi, 16);
+            resized_y
+                .compute_at(resized_y.in(), xo)
+                .store_in(MemoryType::WMMAAccumulator);
+            resized_y
+                .vectorize(xi, 16)
+                .vectorize(yi, 16);
+            resized_y
+                .update()
+                .reorder(ry.x, xi, yi, ry.y, xo, yo, c)
+                .atomic()
+                .vectorize(ry.x)
+                .vectorize(xi)
+                .vectorize(yi);
+
             resized_yf16
-                .compute_at(resized_x.in(), xo);
+                .compute_at(output, y);
 
             resized_x
                 .in()
