@@ -60,7 +60,7 @@ static KernelInfo kernel_info[] = {
 
 class Resize : public Halide::Generator<Resize> {
 public:
-    GeneratorParam<InterpolationType> interpolation_type{"interpolation_type", Cubic, {{"box", Box}, {"linear", Linear}, {"cubic", Cubic}, {"lanczos", Lanczos}}};
+    GeneratorParam<InterpolationType> interpolation_type{"interpolation_type", Lanczos, {{"box", Box}, {"linear", Linear}, {"cubic", Cubic}, {"lanczos", Lanczos}}};
 
     // If we statically know whether we're upsampling or downsampling,
     // we can generate different pipelines (we want to reorder the
@@ -118,7 +118,7 @@ public:
     // arbitrary scaling factor, the filter coefficients are
     // different for each x and y coordinate. Use strict-float to
     // ensure fast-math doesn't mess up our bounds inference.
-    bool strict = false;
+    bool strict = true;
 
     Expr begin_of(Expr x) {
         Expr sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
@@ -135,7 +135,6 @@ public:
 
     void generate() {
 
-        // Handle different types by just casting to float
         as_float(x, y, c) = cast<float16_t>(input(x, y, c));
 
         // For downscaling, widen the interpolation kernel to perform lowpass
@@ -292,8 +291,8 @@ public:
             .vectorize(y);
         kernel_y
             // TODO: for debugging
-            .compute_at(output, y)
-            // .compute_root()
+            // .compute_at(output, y)
+            .compute_root()
             .reorder(k, y)
             .vectorize(y, vec);
 
@@ -312,7 +311,7 @@ public:
                 .unroll(c);
         } else {
             output
-                .specialize(input.dim(0).extent() % block_size == 0)
+                .specialize(input.dim(0).extent() % block_size == 0 && (input.dim(0).extent() / block_size) * block_size == input.dim(0).extent() )
                 .tile(x, y, xi, yi, 16, 16)
                 .fuse(xi, yi, z)
                 .split(z, zo, zi, 32)
@@ -321,7 +320,6 @@ public:
                 .gpu_threads(zi)
                 .gpu_blocks(c, y);
             output.specialize_fail("we assume image width is divisible by 16");
-
             as_float.compute_at(output, y);
             kernel_blocks_y.compute_at(resized_y, ry.y)
                 .fuse(xi, yi, z)
@@ -379,8 +377,6 @@ public:
                 // zi correspond to two 16-element contiguous vectors
                 .reorder(zo, zi)
                 .gpu_threads(zi);
-            output.print_loop_nest();
-            // exit(1);
         }
 
         output.dim(0).set_stride(1);
