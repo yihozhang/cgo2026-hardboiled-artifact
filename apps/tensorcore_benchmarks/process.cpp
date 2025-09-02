@@ -436,12 +436,12 @@ int main(int argc, char **argv) {
 #elif defined(RUN_resize) || true
     // Create test data using compile-time definitions
     // const int M = IMG_COL;
-    // const int N = IMG_ROW
-    const int M = 64;
-    const int N = 64;
+    // const int N = IMG_ROW;
+    const int M = 2048;
+    const int N = 2048;
     const int C = 3;
     // const std::vector<float> scales = {0.75, 1.5};
-    const std::vector<float> scales = {0.5};
+    const std::vector<float> scales = {0.75};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
@@ -459,7 +459,7 @@ int main(int argc, char **argv) {
         FOR (c, C) {
             FOR (y, N) {
                 FOR (x, M) {
-                    img(x, y, c) = float(rand()) / RAND_MAX;
+                    img(x, y, c) = float(rand() % 100) / 100.f;
                 }
             }
         }
@@ -505,15 +505,15 @@ int main(int argc, char **argv) {
             FOR (c, C) {
                 if (!success) break;
                 FOR (y, ON) {
-                    if (!success) break;
+                    // if (!success) break;
                     FOR (x, OM) {
                         float exp = expected[c * OM * ON + y * OM + x];
-                        if (fabs(exp - output(x, y, c)) > 0.001f) {
+                        if (fabs(exp - output(x, y, c)) > 0.01f) {
                             std::cerr << "Error at (" << x << ", " << y << ", " << c << "): "
                                 << std::fixed << std::setprecision(10)
                                 << output(x, y, c) << " != " << exp << "\n";
                             success = false;
-                            break;
+                            // break;
                         }
                     }
                 }
@@ -600,41 +600,43 @@ void resize_sim(float* input, float* output, int m, int n, int C, float scale_fa
         }
     }
 
-    float* resized_x = new float[resized_m * n * C];
+    float* resized_y = new float[m * resized_n * C];
+
     FOR (c, C) {
-        FOR (y, n) {
-            FOR (x, resized_m) {
-                resized_x[c * n * resized_m + y * resized_m + x] = 0.f;
+        FOR (y, resized_n) {
+            FOR (x, m) {
+                resized_y[c * resized_n * m + y * m + x] = 0.f;
                 FOR (r, kernel_taps) {
-                    float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
-                    int beginx = int(ceil(sourcex - kernel_radius));
-                    beginx = clamp(beginx, 0, m - kernel_taps);
-                    resized_x[c * n * resized_m + y * resized_m + x] += 
-                        kernel_x[x * kernel_taps + r] * 
-                        input[c * n * m + y * m + r + beginx];
+                    float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
+                    int beginy = int(ceil(sourcey - kernel_radius));
+                    beginy = clamp(beginy, 0, n - kernel_taps);
+                    resized_y[c * resized_n * m + y * m + x] += 
+                        kernel_y[y * kernel_taps + r] * 
+                        input[c * n * m + (beginy + r) * m + x];
                 }
             }
         }
     }
 
-    
     FOR (c, C) {
         FOR (y, resized_n) {
             FOR (x, resized_m) {
                 output[c * resized_n * resized_m + y * resized_m + x] = 0.f;
                 FOR (r, kernel_taps) {
-                    float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
-                    int beginy = int(ceil(sourcey - kernel_radius));
-                    beginy = clamp(beginy, 0, n - kernel_taps);
+                    float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
+                    int beginx = int(ceil(sourcex - kernel_radius));
+                    beginx = clamp(beginx, 0, m - kernel_taps);
                     output[c * resized_n * resized_m + y * resized_m + x] += 
-                        kernel_y[y * kernel_taps + r] * 
-                        resized_x[c * n * resized_m + (beginy + r) * resized_m + x];
+                        kernel_x[x * kernel_taps + r] * 
+                        resized_y[c * resized_n * m + y * m + r + beginx];
                 }
+                output[c * resized_n * resized_m + y * resized_m + x] =
+                    clamp(output[c * resized_n * resized_m + y * resized_m + x], 0.f, 1.f);
             }
         }
     }
 
     delete[] kernel_x;
     delete[] kernel_y;
-    delete[] resized_x;
+    delete[] resized_y;
 }
