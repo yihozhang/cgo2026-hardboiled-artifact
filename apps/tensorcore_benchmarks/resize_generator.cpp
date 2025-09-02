@@ -282,19 +282,6 @@ public:
             .gpu_blocks(yo)
             .gpu_threads(yi);
 
-        // -------------- output --------------
-        output
-            .specialize(input.dim(0).extent() % block_size == 0 && (input.dim(0).extent() / block_size) * block_size == input.dim(0).extent() )
-            .tile(x, y, xi, yi, 16, 16)
-            .fuse(xi, yi, z)
-            .split(z, zo, zi, 32)
-            // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi, x, y, c)
-            .gpu_threads(zi)
-            .gpu_blocks(c, y);
-        if (!debug) output.unroll(zo);
-        output.specialize_fail("we assume image width is divisible by 16");
-
         // -------------- resized_y --------------
         as_float // indexed in resized_y by xo and ry.y
             .compute_at(resized_y, xo)
@@ -302,7 +289,7 @@ public:
             .fuse(xi, yi, z)
             .gpu_threads(z)
             .reorder(x, y, z);
-        if (!debug) as_float.unroll(yi, 8);
+        if (!debug) as_float.unroll(y, 8);
         kernel_blocks_y // indexed in resized_y by yo and ry.y
             .compute_at(resized_y, ry.y)
             .fuse(xi, yi, z)
@@ -372,6 +359,22 @@ public:
             .vectorize(rx.x)
             .vectorize(xi)
             .vectorize(yi);
+        
+        // -------------- output --------------
+        auto output_specialized = output
+            .specialize(input.dim(0).extent() % block_size == 0 && (input.dim(0).extent() / block_size) * block_size == input.dim(0).extent() );
+        output_specialized
+            .tile(x, y, xi, yi, 16, 16)
+            .split(x, xo, x, 2)
+            .split(y, yo, y, 2)
+            .fuse(xi, yi, z)
+            .split(z, zo, zi, 32)
+            // zi correspond to two 16-element contiguous vectors
+            .reorder(zo, zi, x, y, xo, yo, c)
+            .gpu_threads(zi)
+            .gpu_blocks(c, yo, xo);
+        if (!debug) output_specialized.unroll(zo);
+        output.specialize_fail("we assume image width is divisible by 16");
 
 
         output.dim(0).set_stride(1);

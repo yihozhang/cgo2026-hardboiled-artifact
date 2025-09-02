@@ -505,7 +505,7 @@ int main(int argc, char **argv) {
             FOR (c, C) {
                 if (!success) break;
                 FOR (y, ON) {
-                    // if (!success) break;
+                    if (!success) break;
                     FOR (x, OM) {
                         float exp = expected[c * OM * ON + y * OM + x];
                         if (fabs(exp - output(x, y, c)) > 0.01f) {
@@ -513,7 +513,7 @@ int main(int argc, char **argv) {
                                 << std::fixed << std::setprecision(10)
                                 << output(x, y, c) << " != " << exp << "\n";
                             success = false;
-                            // break;
+                            break;
                         }
                     }
                 }
