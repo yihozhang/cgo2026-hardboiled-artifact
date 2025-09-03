@@ -69,14 +69,19 @@ $(GENERATOR_BIN)/resize.generator: resize_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ $(LIBHALIDE_LDFLAGS)
 
-.PRECIOUS: $(BIN)/%/resize.a
-$(BIN)/%/resize.a: $(GENERATOR_BIN)/resize.generator
+.PRECIOUS: $(BIN)/%/resize_up.a
+$(BIN)/%/resize_up.a: $(GENERATOR_BIN)/resize.generator
 	@mkdir -p $(@D)
-	$^ -g resize -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f resize target=$(HL_TARGET) gpu_schedule=$*
+	$^ -g resize -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f resize_up target=$(HL_TARGET) gpu_schedule=$* upsample=true
 
-$(BIN)/%/resize: process.cpp $(BIN)/%/resize.a 
+.PRECIOUS: $(BIN)/%/resize_down.a
+$(BIN)/%/resize_down.a: $(GENERATOR_BIN)/resize.generator
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/resize.h\"" -DBENCHMARK_NAME="\"resize\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_resize
+	$^ -g resize -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f resize_down target=$(HL_TARGET) gpu_schedule=$* upsample=false
+
+$(BIN)/%/resize: process.cpp $(BIN)/%/resize_down.a $(BIN)/%/resize_up.a 
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/resize_up.h\"" -DBENCHMARK_HEADER_EXTRA="\"$(BIN)/$*/resize_down.h\"" -DBENCHMARK_NAME="\"resize\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_resize
 
 $(GENERATOR_BIN)/rec_filter.generator: rec_filter_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)

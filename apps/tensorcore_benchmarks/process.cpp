@@ -13,7 +13,11 @@
 #error "BENCHMARK_HEADER must be defined"
 #endif
 
+
 #include BENCHMARK_HEADER
+#if defined(RUN_resize)
+#include BENCHMARK_HEADER_EXTRA
+#endif
 
 #define FOR(i, N) for (int i = 0; i < (N); i++)
 
@@ -433,7 +437,7 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-#elif defined(RUN_resize) || true
+#elif defined(RUN_resize)
     // Create test data using compile-time definitions
     // const int M = IMG_COL;
     // const int N = IMG_ROW;
@@ -441,7 +445,7 @@ int main(int argc, char **argv) {
     const int N = 2048;
     const int C = 3;
     // const std::vector<float> scales = {0.75, 1.5};
-    const std::vector<float> scales = {0.25, 0.75, 0.9, 0.99};
+    const std::vector<float> scales = {0.1,0.25, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
@@ -468,6 +472,7 @@ int main(int argc, char **argv) {
         const int OM_realized = (OM + 15) & ~15;
         const int ON_realized = (ON + 15) & ~15;
         Buffer<float, 3> output(OM_realized, ON_realized, C);
+        auto resize = scale > 1.0f ? resize_up : resize_down;
         auto time = benchmark(5, 5, [&]() {
             resize(img.raw_buffer(), scale, output.raw_buffer());
             output.device_sync();
