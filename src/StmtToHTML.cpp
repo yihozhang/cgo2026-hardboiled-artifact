@@ -797,7 +797,6 @@ public:
     // CUDA kernels are embedded into modules as PTX assembly. This
     // routine pretty - prints that assembly format.
     void print_cuda_gpu_source_kernels(const std::string &str) {
-        std::cout << str << "\n";
         print_opening_tag("div", "code ptx");
 
         int current_id = -1;

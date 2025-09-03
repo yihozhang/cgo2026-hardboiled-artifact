@@ -81,7 +81,7 @@ $(BIN)/%/resize_down.a: $(GENERATOR_BIN)/resize.generator
 
 $(BIN)/%/resize: process.cpp $(BIN)/%/resize_down.a $(BIN)/%/resize_up.a 
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/resize_up.h\"" -DBENCHMARK_HEADER_EXTRA="\"$(BIN)/$*/resize_down.h\"" -DBENCHMARK_NAME="\"resize\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_resize
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/resize_up.h\"" -DBENCHMARK_HEADER_EXTRA="\"$(BIN)/$*/resize_down.h\"" -DBENCHMARK_NAME="\"resize\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=2048 -DIMG_COL=2048 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_resize
 
 $(GENERATOR_BIN)/rec_filter.generator: rec_filter_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)

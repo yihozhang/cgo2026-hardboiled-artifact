@@ -439,10 +439,8 @@ int main(int argc, char **argv) {
     }
 #elif defined(RUN_resize)
     // Create test data using compile-time definitions
-    // const int M = IMG_COL;
-    // const int N = IMG_ROW;
-    const int M = 2048;
-    const int N = 2048;
+    const int M = IMG_COL;
+    const int N = IMG_ROW;
     const int C = 3;
     // const std::vector<float> scales = {0.75, 1.5};
     const std::vector<float> scales = {0.1,0.25, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};

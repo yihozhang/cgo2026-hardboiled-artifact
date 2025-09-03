@@ -4,8 +4,8 @@ set -euo pipefail
 # Default values
 BENCHMARK="conv1d"
 TARGET="win"
-SCHEDULE="tensorcore"
-CONV_KERNEL_SIZE="16"
+SCHEDULE="cuda_only"
+CONV_KERNEL_SIZE="128"
 CONV_IMG_COL="3840"
 CONV_IMG_ROW="2160"
 MATMUL_M="4096"
