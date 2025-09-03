@@ -173,6 +173,10 @@ public:
         kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
         kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
 
+        // Want to state this but cannot
+        kernel_x.bound(k, 0, kernel_taps);
+        kernel_y.bound(k, 0, kernel_taps);
+
         // -------------- original algorithm -------------- 
         // resized_y(x, y, c) = cast<float16_t>(0.f);
         // resized_y(x, y, c) += cast<float16_t>(cast<float>(kernel_y(y, r)) * cast<float>(as_float(x, r + beginy, c)));
@@ -202,8 +206,8 @@ public:
         */
         Expr offset_from_beginy = (xo * block_size + xi) - begin_of(yo * block_size + yi);
         kernel_blocks_y(xi, yi, xo, yo) = 
-            select(0 <= offset_from_beginy && offset_from_beginy <= kernel_taps, kernel_y(yo * block_size + yi, offset_from_beginy), 0);
-        
+            select(0 <= offset_from_beginy && offset_from_beginy < kernel_taps, kernel_y(yo * block_size + yi, clamp(offset_from_beginy, 0, kernel_taps - 1)), 0);
+
         ry = {0, block_size, 0, input.dim(1).extent() / 16, "ry"};
         ry.where(is_empty_block_y(ry.y, yo));
         resized_y(xi, yi, xo, yo, c) = 0.f;
@@ -236,8 +240,9 @@ public:
             -------------------
         */
         Expr offset_from_beginx = (yo * block_size + yi) - begin_of(xo * block_size + xi);
+        // Need to clamp offset_from_beginx to ensure kernel_x is computed over an appropriate range
         kernel_blocks_x(xi, yi, xo, yo) = 
-            select(0 <= offset_from_beginx && offset_from_beginx <= kernel_taps, kernel_x(xo * block_size + xi, offset_from_beginx), 0);
+            select(0 <= offset_from_beginx && offset_from_beginx < kernel_taps, kernel_x(xo * block_size + xi, clamp(offset_from_beginx, 0, kernel_taps - 1)), 0);
         
         rx = {0, block_size, 0, input.dim(0).extent() / 16, "rx"};
         rx.where(is_empty_block_x(xo, rx.y));
@@ -252,15 +257,15 @@ public:
     }
 
     void schedule() {
-        const bool debug = true;
+        const bool debug = false;
 
         // -------------- kernel_x --------------
+        // unnormalized_kernel_x.reorder_storage(k, x);
+        // kernel_x.reorder_storage(k, x);
         unnormalized_kernel_x
-            .compute_at(kernel_x, xi)
-            .gpu_threads(x);
+            .compute_at(kernel_x, xi);
         kernel_sum_x
-            .compute_at(kernel_x, xi)
-            .gpu_threads(x);
+            .compute_at(kernel_x, xi);
         kernel_x
             .compute_root()
             .split(x, xo, xi, 32)
@@ -269,6 +274,8 @@ public:
             .gpu_threads(xi);
 
         // -------------- kernel_y --------------
+        // unnormalized_kernel_y.reorder_storage(k, y);
+        // kernel_y.reorder_storage(k, y);
         unnormalized_kernel_y
             .compute_at(kernel_y, yi)
             .gpu_threads(y);
@@ -284,12 +291,15 @@ public:
 
         // -------------- resized_y --------------
         as_float // indexed in resized_y by xo and ry.y
-            .compute_at(resized_y, xo)
+            .compute_root()
+            .tile(x, y, xo, yo, x, y, 16 * 8, 2 * 2, TailStrategy::RoundUp)
             .tile(x, y, xi, yi, 16, 2)
             .fuse(xi, yi, z)
             .gpu_threads(z)
-            .reorder(x, y, z);
-        if (!debug) as_float.unroll(y, 8);
+            .gpu_blocks(xo, yo, c)
+            .reorder(x, y, z, xo, yo, c);
+        if (!debug) as_float.unroll(x).unroll(y);
+
         kernel_blocks_y // indexed in resized_y by yo and ry.y
             .compute_at(resized_y, ry.y)
             .fuse(xi, yi, z)
@@ -301,34 +311,39 @@ public:
 
         resized_y
             .in()
-            .compute_at(resized_x, rx.y)
+            .compute_at(resized_yf16, x)
+            .reorder(xi, yi, xo, c, yo)
             .vectorize(xi, 16)
             .vectorize(yi, 16);
         resized_y
-            .compute_at(resized_y.in(), xo)
+            .compute_at(resized_yf16, y)
             .store_in(MemoryType::WMMAAccumulator);
         resized_y
             .vectorize(xi, 16)
             .vectorize(yi, 16);
         resized_y
             .update()
-            // TODO: tiling over yo, xo?
-            .reorder(ry.x, xi, yi, yo, xo, ry.y, c)
+            // yo and ry.y determines the kernel_blocks to be loaded
+            .reorder(ry.x, xi, yi, xo, c, ry.y, yo)
             .atomic()
             .vectorize(ry.x)
             .vectorize(xi)
             .vectorize(yi);
+        if (!debug) resized_y.unroll(c).unroll(xo).unroll(yo);
+        if (!debug) resized_y.update().unroll(c).unroll(xo).unroll(yo);
 
-        // -------------- resized_x --------------
         resized_yf16 // indexed in resized_x by rx.y and yo
-            .compute_at(resized_x, yo)
+            .compute_root()
+            .tile(xo, yo, x, y, 2, 1)
             .fuse(xi, yi, z)
             .split(z, zo, zi, 32)
             // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi)
+            .reorder(zo, zi, x, c, y, xo, yo)
+            .gpu_blocks(xo, yo)
             .gpu_threads(zi);
-        if (!debug) resized_yf16.unroll(zo);
+        if (!debug) resized_yf16.unroll(c).unroll(x).unroll(y).unroll(zo);
 
+        // -------------- resized_x --------------
         kernel_blocks_x // indexed in resized_x by rx.y and xo
             .compute_at(resized_x, rx.y)
             .fuse(xi, yi, z)
@@ -340,59 +355,59 @@ public:
 
         resized_x
             .in()
-            .compute_at(output, x)
-            .reorder(xi, yi, xo, yo, c)
+            .compute_at(output, y)
+            .reorder(xi, yi, yo, c, xo)
             .vectorize(yi)
             .vectorize(xi);
         
         resized_x
-            .compute_at(resized_x.in(), xo)
+            .compute_at(output, xo)
             .store_in(MemoryType::WMMAAccumulator);
         resized_x
             .vectorize(yi, 16)
             .vectorize(xi, 16);
         resized_x
             .update()
-            // yo and rx.y determines the resized_y block to be computed
-            .reorder(rx.x, xi, yi, xo, yo, rx.y, c)
+            // xo and rx.y determines the kernel_blocks_x to load,
+            .reorder(rx.x, xi, yi, yo, c, rx.y, xo)
             .atomic()
             .vectorize(rx.x)
             .vectorize(xi)
             .vectorize(yi);
-        
+        if (!debug) resized_x.unroll(c);
+        if (!debug) resized_x.update().unroll(c);
+
         // -------------- output --------------
-        auto output_specialized = output
-            .specialize(input.dim(0).extent() % block_size == 0 && (input.dim(0).extent() / block_size) * block_size == input.dim(0).extent() );
+        auto& output_specialized = output;
         output_specialized
-            .tile(x, y, xi, yi, 16, 16)
-            .split(x, xo, x, 2)
-            .split(y, yo, y, 2)
+            .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
+            .tile(x, y, xo, yo, x, y, 1, 1)
             .fuse(xi, yi, z)
             .split(z, zo, zi, 32)
             // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi, x, y, xo, yo, c)
+            .reorder(zo, zi, y, c, x, xo, yo)
             .gpu_threads(zi)
-            .gpu_blocks(c, yo, xo);
-        if (!debug) output_specialized.unroll(zo);
-        output.specialize_fail("we assume image width is divisible by 16");
+            .gpu_blocks(yo, xo);
+        if (!debug) output_specialized.unroll(c).unroll(zo).unroll(x).unroll(y);
 
 
         output.dim(0).set_stride(1);
         output.dim(0).set_min(0);
         output.dim(1).set_min(0);
         output.dim(2).set_min(0);
+        output.dim(2).set_extent(3);
         input.dim(0).set_stride(1);
         input.dim(0).set_min(0);
         input.dim(1).set_min(0);
         input.dim(2).set_min(0);
+        input.dim(2).set_extent(3);
 
+        // with concrete numbers
         if (debug) {
             input.dim(0).set_extent(2048);
             input.dim(1).set_extent(2048);
-            input.dim(2).set_extent(3);
             output.dim(0).set_extent(int(2048 * 0.75));
             output.dim(1).set_extent(int(2048 * 0.75));
-            output.dim(2).set_extent(3);
             
             output.print_loop_nest();
         }

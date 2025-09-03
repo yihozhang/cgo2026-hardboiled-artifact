@@ -441,7 +441,7 @@ int main(int argc, char **argv) {
     const int N = 2048;
     const int C = 3;
     // const std::vector<float> scales = {0.75, 1.5};
-    const std::vector<float> scales = {0.75};
+    const std::vector<float> scales = {0.25, 0.75, 0.9, 0.99};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
@@ -464,7 +464,10 @@ int main(int argc, char **argv) {
             }
         }
 
-        Buffer<float, 3> output(OM, ON, C);
+        // smallest multiple of 16 that is greater than OM and ON.
+        const int OM_realized = (OM + 15) & ~15;
+        const int ON_realized = (ON + 15) & ~15;
+        Buffer<float, 3> output(OM_realized, ON_realized, C);
         auto time = benchmark(5, 5, [&]() {
             resize(img.raw_buffer(), scale, output.raw_buffer());
             output.device_sync();
@@ -521,7 +524,6 @@ int main(int argc, char **argv) {
 
             if (success) {
                 std::cout << "Outputs match!\n";
-                return 0;
             } else {
                 std::cout << "Outputs do not match...\n";
                 return 1;
