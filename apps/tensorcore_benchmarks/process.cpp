@@ -347,9 +347,8 @@ int main(int argc, char **argv) {
         }
     }
 #elif defined(RUN_rec_filter)
-    // Create test data using compile-time definitions
-    const int M = IMG_COL;
-    const int N = IMG_ROW;
+    const int M = IMG_COL; // by default this is 1024*1024
+    const int N = 2; // stereo audio
 
     std::string benchmark_name = BENCHMARK_NAME;
 
@@ -368,7 +367,7 @@ int main(int argc, char **argv) {
     img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
     // Create output buffer
-    Buffer<float> output(M, N);
+    Buffer<float> output(16, M/16, N);
 
     float a = 0.9, b = -0.45;
     // Call the generated function
@@ -407,23 +406,23 @@ int main(int argc, char **argv) {
 
     // Verify results
     if (VERIFY_OUTPUT) {
-        float expected[256][256] = {0.f};
+        float expected[100000][2] = {0.f};
         bool success = true;
-        for (int y = 0; y < 256; y++) {
+        for (int y = 0; y < 2; y++) {
             if (!success) {
                 break;
             }
-            for (int x = 0; x < 256; x++) {
+            for (int x = 0; x < 100000; x++) {
                 if (!success) {
                     break;
                 }
                 expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
                     (x > 0 ? expected[x-1][y] * a : 0.f) + 
                     (x > 1 ? expected[x-2][y] * b : 0.f);
-                if (fabs(expected[x][y] - output(x, y)) > 0.001f) {
+                if (fabs(expected[x][y] - output(x%16,x/16, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
-                              << output(x, y) << " != " << expected[x][y] << "\n";
+                              << output(x%16,x/16, y) << " != " << expected[x][y] << "\n";
                     success = false;
                 }
             }
