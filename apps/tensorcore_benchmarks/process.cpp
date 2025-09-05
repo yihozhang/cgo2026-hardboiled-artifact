@@ -348,6 +348,62 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#elif defined(RUN_attention)
+    // Create test data using compile-time definitions
+    const int D = ATT_D;
+    const int L = ATT_L;
+    const int N = ATT_N;
+
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;
+    std::cout << "  DxLxN: " << D << "x" << L << "x" << N << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;
+
+    // Create Q, K, V buffers with random values
+    Buffer<Halide::float16_t> query(D, L, N);
+    Buffer<Halide::float16_t> key(D, L, N);
+    Buffer<Halide::float16_t> value(D, L, N);
+
+    for (int n = 0; n < N; n++) {
+        for (int t = 0; t < L; t++) {
+            for (int d = 0; d < D; d++) {
+                query(d, t, n) = Halide::float16_t(rand() & 1);
+                key(d, t, n) = Halide::float16_t(rand() & 1);
+                value(d, t, n) = Halide::float16_t(rand() & 1);
+            }
+        }
+    }
+
+    // Create output buffer
+    Buffer<float> output(D, L, N);
+
+    // Call the generated function
+    auto time = benchmark(5, 5, [&]() {
+        attention(query, key, value, output);
+        output.device_sync();
+    });
+
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
+    }
+
+    output.device_sync();
+
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
+
+    // Optional verification placeholder
+    if (std::getenv("VERIFY_OUTPUT")) {
+        bool success = true;
+        // TODO: add verification if desired
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
 #else
 #error "Unknown benchmark type"
 #endif

@@ -13,6 +13,9 @@ NN_TENSOR_N="128"
 NN_TENSOR_H="64"
 NN_TENSOR_W="64"
 NN_TENSOR_C="16"
+ATT_D="128"
+ATT_L="64"
+ATT_N="8"
 MATMUL_M="4096"
 MATMUL_N="4096"
 MATMUL_K="4096"
@@ -24,13 +27,14 @@ show_help() {
     echo "Build Halide benchmarks for different targets"
     echo ""
     echo "Options:"
-    echo "  -b,         --benchmark NAME            Benchmark to build (conv1d, conv2d, or matmul) [default: conv1d]"
+    echo "  -b,         --benchmark NAME            Benchmark to build (conv1d, conv2d, upsample, downsample, matmul, conv_layer, attention) [default: conv1d]"
     echo "  -t,         --target TARGET             Target architecture (host, win, or linux) [default: host]"
     echo "  -s,         --schedule SCHEDULE         Schedule to use (cuda_only or tensorcore) [default: cuda_only]"
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
     echo "  -conv_col,  --img-cols IMG_COL          Image width (3840) [default: 3840]"
     echo "  -conv_row,  --img-rows IMG_ROW          Image height (2160) [default: 2160]"
-    echo "  -nhwc,      --nhwc N H W C              Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
+    echo "  -nhwc,      --nhwc N,H,W,C              Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
+    echo "  -att,       --att D L N                 Attention dims D, L, N [default: 128 64 8]"
     echo "  -mm_m,      --matmul-m MATMUL_M         Rows of the input matrix A [default: 4096]"
     echo "  -mm_n,      --matmul-n MATMUL_N         Columns of the input matrix B [default: 4096]"
     echo "  -mm_k,      --matmul-k MATMUL_K         Columns of the input matrix A / Rows of the input matrix B [default: 4096]"
@@ -38,11 +42,12 @@ show_help() {
     echo "  -h, --help                              Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 -b conv1d -t win                  # Build conv1d for Windows"
-    echo "  $0 -b conv2d -t linux                # Build conv2d for Linux"
-    echo "  $0 -b conv2d -t linux -s tensorcore  # Build conv2d for Linux with tensorcore schedule"
-    echo "  $0 -b matmul -t linux -mm_mnk 1024   # Build matmul for Linux with 1024x1024 matrices"
-    echo "  $0                                   # Build conv1d for host (default)"
+    echo "  $0 -b conv1d -t win                     # Build conv1d for Windows"
+    echo "  $0 -b conv2d -t linux                   # Build conv2d for Linux"
+    echo "  $0 -b conv2d -t linux -s tensorcore     # Build conv2d for Linux with tensorcore schedule"
+    echo "  $0 -b matmul -t linux -mm_mnk 1024      # Build matmul for Linux with 1024x1024 matrices"
+    echo "  $0 -b attention -t host -att 128 64 8   # Build attention for host with D=128 L=64 N=8"
+    echo "  $0                                      # Build conv1d for host (default)"
 }
 
 # Parse command line arguments
@@ -79,6 +84,12 @@ while [[ $# -gt 0 ]]; do
             NN_TENSOR_C="$5"
             shift 5
             ;;
+        -att|--att)
+            ATT_D="$2"
+            ATT_L="$3"
+            ATT_N="$4"
+            shift 4
+            ;;
         -mm_m|--matmul-m)
             MATMUL_M="$2"
             shift 2
@@ -113,8 +124,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate benchmark name
-if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample|conv_layer)$ ]]; then
-    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be either 'conv1d', 'conv2d', 'upsample', 'downsample', 'matmul', or 'conv_layer'"
+if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample|conv_layer|attention)$ ]]; then
+    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be one of: conv1d, conv2d, upsample, downsample, matmul, conv_layer, attention"
     exit 1
 fi
 
@@ -138,6 +149,9 @@ cmake -S . -B build \
     -DNN_TENSOR_H=$NN_TENSOR_H \
     -DNN_TENSOR_W=$NN_TENSOR_W \
     -DNN_TENSOR_C=$NN_TENSOR_C \
+    -DATT_D=$ATT_D \
+    -DATT_L=$ATT_L \
+    -DATT_N=$ATT_N \
     -DMATMUL_M=$MATMUL_M \
     -DMATMUL_N=$MATMUL_N \
     -DMATMUL_K=$MATMUL_K \

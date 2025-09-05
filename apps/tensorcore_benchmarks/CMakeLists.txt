@@ -19,6 +19,11 @@ set(NN_TENSOR_H 64 CACHE STRING "Image height (H) for NN layers")
 set(NN_TENSOR_W 64 CACHE STRING "Image width (W) for NN layers")
 set(NN_TENSOR_C 16 CACHE STRING "Channels (C) for NN layers")
 
+# Attention parameters
+set(ATT_D 128 CACHE STRING "Feature dimension (D) for attention")
+set(ATT_L 64 CACHE STRING "Sequence length (L) for attention")
+set(ATT_N 8 CACHE STRING "Batch size (N) for attention")
+
 # Matmul parameters
 set(MATMUL_M 4096 CACHE STRING "Rows of the input matrix A")
 set(MATMUL_N 4096 CACHE STRING "Columns of the input matrix B")
@@ -41,6 +46,7 @@ add_halide_generator(upsample.generator SOURCES upsample_generator.cpp)
 add_halide_generator(downsample.generator SOURCES downsample_generator.cpp)
 add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
 add_halide_generator(conv_layer.generator SOURCES conv_layer_generator.cpp)
+add_halide_generator(attention.generator SOURCES attention_generator.cpp)
 
 # Create compiled libraries (adding extra targets for cross-compilation)
 add_conv_library(conv1d_lib conv1d host-cuda-cuda_capability_80)
@@ -67,6 +73,10 @@ add_nnl_library(conv_layer_lib conv_layer host-cuda-cuda_capability_80)
 add_nnl_library(conv_layer_lib_win conv_layer x86-64-windows-cuda-cuda_capability_80)
 add_nnl_library(conv_layer_lib_linux conv_layer x86-64-linux-cuda-cuda_capability_80)
 
+add_attn_library(attention_lib attention host-cuda-cuda_capability_80)
+add_attn_library(attention_lib_win attention x86-64-windows-cuda-cuda_capability_80)
+add_attn_library(attention_lib_linux attention x86-64-linux-cuda-cuda_capability_80)
+
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
 add_executable(conv2d process.cpp)
@@ -74,6 +84,7 @@ add_executable(matmul process.cpp)
 add_executable(upsample process.cpp)
 add_executable(downsample process.cpp)
 add_executable(conv_layer process.cpp)
+add_executable(attention process.cpp)
 
 target_compile_definitions(conv1d
     PRIVATE
@@ -149,6 +160,18 @@ target_compile_definitions(conv_layer
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
+target_compile_definitions(attention
+    PRIVATE
+    BENCHMARK_HEADER="attention_lib.h"
+    BENCHMARK_NAME="attention"
+    RUN_attention
+    ATT_D=${ATT_D}
+    ATT_L=${ATT_L}
+    ATT_N=${ATT_N}
+    SCHEDULE="${SCHEDULE}"
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
 target_link_libraries(conv1d
     PRIVATE
     conv1d_lib
@@ -187,6 +210,13 @@ target_link_libraries(matmul
 target_link_libraries(conv_layer
     PRIVATE
     conv_layer_lib
+    Halide::Halide
+    Halide::Tools
+)
+
+target_link_libraries(attention
+    PRIVATE
+    attention_lib
     Halide::Halide
     Halide::Tools
 )
