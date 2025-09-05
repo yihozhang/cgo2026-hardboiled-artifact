@@ -164,20 +164,17 @@ public:
         // non-zeros. We'll therefore represent only a contiguous region, and
         // remember the column it starts at as a separate expression. We can
         // start at any column we like! We just need to ensure we store enough
-        // columns. We'll make the start the same for each group of 16 rows plus
-        // linear function of the residual, to make tiling easier (the
-        // source address becomes integer-linear in the inner loop).
+        // columns. We'll make the start the same for each group of 16
+        // rows. This means we can schedule the inner loop like a matmul, which
+        // gives a large speed-up even when not using tensor cores.
         constexpr int tile = 16;
 
-        // TODO: Setting this to zero makes it a matmul, but setting it as below
-        // makes the resized_y kernel 2x faster for a high-quality resizing kernel
-        Expr integer_stride = 0;  // cast<int>(floor(inverse_scale_factor));
-        Expr beginx = begin_of((x / tile) * tile) + (x % tile) * integer_stride;
-        Expr beginy = begin_of((y / tile) * tile) + (y % tile) * integer_stride;
+        Expr beginx = begin_of((x / tile) * tile);
+        Expr beginy = begin_of((y / tile) * tile);
 
         // Moving beginx back like this means we need to represent a longer
         // contiguous region.
-        Expr extra_zeros = begin_of(tile) - begin_of(0) - tile * integer_stride;
+        Expr extra_zeros = begin_of(tile) - begin_of(0);
 
         // We'll also round up the output to the next multiple of 16.
         Expr span = ((kernel_taps + extra_zeros + tile - 1) / tile) * tile;
@@ -264,15 +261,16 @@ public:
         kernel_y.in().compute_at(resized_y, r).vectorize(y).vectorize(k);
 
         // For large downsamples, it's hard to fill the machine, because we've
-        // already downsampled in y. We'll use much smaller tiles.
+        // already downsampled in y. We'll use much smaller tiles and map color
+        // channels to gpu threads instead of unrolling them.
         output
             .compute_root()
             .align_bounds(x, 16)
             .align_bounds(y, 16)
-            .reorder(c, x, y)
-            .unroll(c)
             .never_partition(x, y)
+            .gpu_threads(c)
             .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
+            .reorder(xi, yi, c, x, y)
             .tile(xi, yi, xii, yii, 2, 2)
             .vectorize(xii)
             .unroll(yii);
@@ -287,7 +285,7 @@ public:
             .unroll(c)
             .unroll(x)
             .unroll(y);
-        resized_y_f16.in().compute_at(resized_x, c).vectorize(x).vectorize(y);
+        resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
         kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
 
         output.dim(0).set_min(0);
