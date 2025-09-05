@@ -87,55 +87,66 @@ public:
         A.compute_root();
         B.compute_root();
 
-        Var moo("moo"), moi("moi");
+        if (gpu_schedule == Schedule::CUDA) {
+            h
+                .compute_inline()
+                .update()
+                .unroll(w);
+            f_delay
+                .compute_root()
+                .split(m, mo, mi, 16)
+                .split(mo, moo, moi, 16)
+                .reorder(mii, mi, moi, moo, n)
+                .gpu_blocks(moo, n)
+                .gpu_threads(mii, mi)
+                .unroll(moi);
+            f_delay
+                .update()
+                .atomic(true)
+                .reorder(r.y, r.z, n)
+                .gpu_blocks(n)
+                .gpu_threads(r.y)
+                .unroll(r.x);
+        } else {
 
-        h
-            // Due to a bug in bound inference I cannot compute f_delay on-demand.
-            .compute_at(f_delay, moi)
-            // .compute_at(f_delay, moo)
-            .store_in(MemoryType::WMMAAccumulator)
-            .reorder(mii, mi, mo, n)
-            .vectorize(mi)
-            .vectorize(mii)
-            .update()
-            .reorder(w, mii, mi, mo, n)
-            .atomic()
-            .vectorize(mi)
-            .vectorize(mii)
-            .vectorize(w);
+            h
+                .compute_at(f_delay, moi)
+                .store_in(MemoryType::WMMAAccumulator)
+                .reorder(mii, mi, mo, n)
+                .vectorize(mi)
+                .vectorize(mii)
+                .update()
+                .reorder(w, mii, mi, mo, n)
+                .atomic()
+                .vectorize(mi)
+                .vectorize(mii)
+                .vectorize(w);
 
-        f_delay
-            .compute_root()
-            .split(m, mo, mi, 16)
-            // computes (16 x 16) x 256 pixels in a block
-            .split(mo, moo, moi, 256)
-            .reorder(mii, mi, moi, moo, n)
-            .gpu_blocks(moo, n)
-            .vectorize(mi)
-            .vectorize(mii)
-            ;
+            f_delay
+                .compute_root()
+                .split(m, mo, mi, 16)
+                // computes (16 x 16) x 256 pixels in a block
+                .split(mo, moo, moi, 256)
+                .reorder(mii, mi, moi, moo, n)
+                .gpu_blocks(moo, n)
+                .vectorize(mi)
+                .vectorize(mii)
+                ;
 
-        RVar fused("fused");
-        RVar ro("ro"), ri("ri");
-        f_delay
-            .update()
-            .atomic(true)
-            .reorder(r.y, r.z, n)
-            .gpu_blocks(n)
-            .gpu_threads(r.y)
-            .unroll(r.x)
-            // .fuse(r.y, n, fused)
-            // .split(r.z, ro, ri, 512)
-            // .reorder(fused, ri, ro)
-            // .reorder(fused, r.z)
-            // .gpu_threads(fused)
-            // .gpu_blocks(ro)
-            .unroll(r.x)
-            ;
+            f_delay
+                .update()
+                .atomic(true)
+                .reorder(r.y, r.z, n)
+                .gpu_blocks(n)
+                .gpu_threads(r.y)
+                .unroll(r.x);
+        }
     }
 
 private:
     Var x{"x"}, y{"y"}, n{"n"}, m{"m"}, mo{"mo"}, mi{"mi"}, mii{"mii"};
+    Var moo{"moo"}, moi{"moi"};
+    RVar ro{"ro"}, ri{"ri"};
 
     Func a1{"a1"};
     Func A{"A"}, B{"B"};
