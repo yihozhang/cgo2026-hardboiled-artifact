@@ -5,8 +5,8 @@ include ../support/Makefile.inc
 KERNEL_SIZE ?= 16
 
 all: all_cuda_only all_tensorcore
-all_cuda_only: $(BIN)/cuda_only/matmul $(BIN)/cuda_only/conv1d $(BIN)/cuda_only/conv2d $(BIN)/cuda_only/downsample $(BIN)/cuda_only/upsample
-all_tensorcore: $(BIN)/tensorcore/matmul $(BIN)/tensorcore/conv1d $(BIN)/tensorcore/conv2d $(BIN)/tensorcore/downsample $(BIN)/tensorcore/upsample
+all_cuda_only: $(BIN)/cuda_only/matmul $(BIN)/cuda_only/conv1d $(BIN)/cuda_only/conv2d $(BIN)/cuda_only/downsample $(BIN)/cuda_only/upsample $(BIN)/cuda_only/resize
+all_tensorcore: $(BIN)/tensorcore/matmul $(BIN)/tensorcore/conv1d $(BIN)/tensorcore/conv2d $(BIN)/tensorcore/downsample $(BIN)/tensorcore/upsample $(BIN)/tensorcore/resize
 clean:
 	rm -rf $(BIN)
 
@@ -108,3 +108,4 @@ $(BIN)/%/matmul.a: $(GENERATOR_BIN)/matmul.generator
 $(BIN)/%/matmul: process.cpp $(BIN)/%/matmul.a 
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/matmul.h\"" -DBENCHMARK_NAME="\"matmul\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DMATMUL_N=1024 -DMATMUL_M=1024 -DMATMUL_K=1024 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_matmul
+

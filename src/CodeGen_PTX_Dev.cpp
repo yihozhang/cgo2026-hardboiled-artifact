@@ -270,7 +270,7 @@ void CodeGen_PTX_Dev::init_module() {
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32.p3i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.store.d.sync.aligned.row.m32n8k16.f32.p3i32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f32.p3i32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.mma.row.row.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
-        
+
         {"wmma.load.a.sync.aligned.row.m8n32k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.row.m8n32k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.c.sync.aligned.row.m8n32k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
@@ -422,16 +422,22 @@ void CodeGen_PTX_Dev::visit(const Load *op) {
             return;
         }
     }
-    // added a case for 8-wide ramp of 16-bit loads as a single i128 load.
-    if (is_const_one(op->predicate) && r && is_const_one(r->stride) && r->lanes == 8 && op->type.bits() == 16) {
-        ModulusRemainder align = op->alignment;
-        if (align.modulus % 4 == 0 && align.remainder % 4 == 0) {
-            Expr index = simplify(r->base / 8);
-            Expr equiv = Load::make(UInt(128), op->name, index,
-                                    op->image, op->param, const_true(), align / 8);
-            equiv = reinterpret(op->type, equiv);
-            codegen(equiv);
-            return;
+    // added a case for 4 and 8-wide ramp of 16-bit loads as a single i128 load.
+    for (int w : {4, 8}) {
+        if (is_const_one(op->predicate) &&
+            r &&
+            is_const_one(r->stride) &&
+            r->lanes == w &&
+            op->type.bits() == 16) {
+            ModulusRemainder align = op->alignment;
+            if (align.modulus % w == 0 && align.remainder % w == 0) {
+                Expr index = simplify(r->base / w);
+                Expr equiv = Load::make(UInt(16 * w), op->name, index,
+                                        op->image, op->param, const_true(), align / w);
+                equiv = reinterpret(op->type, equiv);
+                codegen(equiv);
+                return;
+            }
         }
     }
 
