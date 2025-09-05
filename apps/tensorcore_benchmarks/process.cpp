@@ -442,7 +442,7 @@ int main(int argc, char **argv) {
     const int N = IMG_ROW;
     const int C = 3;
     // const std::vector<float> scales = {1, 0.75, 1.5};
-    const std::vector<float> scales = {0.1,0.25, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};
+    const std::vector<float> scales = {0.1,0.25, 0.4, 0.5, 0.66, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
@@ -525,7 +525,7 @@ int main(int argc, char **argv) {
             }
 
             if (success) {
-                std::cout << "Outputs match!\n";
+                // std::cout << "Outputs match!\n";
             } else {
                 std::cout << "Outputs do not match...\n";
                 return 1;
