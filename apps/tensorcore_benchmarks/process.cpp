@@ -441,7 +441,7 @@ int main(int argc, char **argv) {
     const int M = IMG_COL;
     const int N = IMG_ROW;
     const int C = 3;
-    // const std::vector<float> scales = {0.75, 1.5};
+    // const std::vector<float> scales = {1, 0.75, 1.5};
     const std::vector<float> scales = {0.1,0.25, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};
     std::string benchmark_name = BENCHMARK_NAME;
 
@@ -466,8 +466,8 @@ int main(int argc, char **argv) {
         }
 
         // smallest multiple of 16 that is greater than OM and ON.
-        const int OM_realized = (OM + 15) & ~15;
-        const int ON_realized = (ON + 15) & ~15;
+        const int OM_realized = (strcmp(SCHEDULE, "tensorcore") == 0) ? ((OM + 15) & ~15) : OM;
+        const int ON_realized = (strcmp(SCHEDULE, "tensorcore") == 0) ? ((ON + 15) & ~15) : ON;
         Buffer<float, 3> output(OM_realized, ON_realized, C);
         auto resize = scale > 1.0f ? resize_up : resize_down;
         auto time = benchmark(5, 5, [&]() {

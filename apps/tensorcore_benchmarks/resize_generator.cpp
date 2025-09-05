@@ -170,95 +170,101 @@ public:
         kernel_sum_x(x) = sum(unnormalized_kernel_x(x, r), "kernel_sum_x");
         kernel_sum_y(y) = sum(unnormalized_kernel_y(y, r), "kernel_sum_y");
 
-        kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
-        kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
 
-        // Want to state this but cannot
-        kernel_x.bound(k, 0, kernel_taps);
-        kernel_y.bound(k, 0, kernel_taps);
+        if (gpu_schedule == Schedule::CUDA) {
+            // no need to convert kernel_x, kernel_y, and input to f16
+            kernel_x(x, k) = unnormalized_kernel_x(x, k) / kernel_sum_x(x);
+            kernel_y(y, k) = unnormalized_kernel_y(y, k) / kernel_sum_y(y);
 
-        // -------------- original algorithm -------------- 
-        // resized_y(x, y, c) = cast<float16_t>(0.f);
-        // resized_y(x, y, c) += cast<float16_t>(cast<float>(kernel_y(y, r)) * cast<float>(as_float(x, r + beginy, c)));
-        // ------------------------------------------------
+            resized_x(x, y, c) = sum(kernel_x(x, r) * input(r + beginx, y, c), "resized_x");
+            resized_y(x, y, c) = sum(kernel_y(y, r) * resized_x(x, r + beginy, c), "resized_y");
+            resized = resized_y;
+        } else {
+            kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
+            kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
 
-        // For a block to be non-empty, intervals [16x, 16x+15] and [begin(16y), begin(16y+15)+taps] need to intersect
-        // begin(x) / 16
-        is_empty_block_y(x, y) = 
-            (x * block_size <= begin_of(block_size * y + block_size - 1) + kernel_taps) && 
-            begin_of(block_size * y) <= x * block_size + block_size - 1;
+            // -------------- original algorithm -------------- 
+            // resized_y(x, y, c) = cast<float16_t>(0.f);
+            // resized_y(x, y, c) += cast<float16_t>(cast<float>(kernel_y(y, r)) * cast<float>(as_float(x, r + beginy, c)));
+            // ------------------------------------------------
 
-        // for y by 16
-        //    start_x = floor(begin(y) / 16)
-        //    end_x  = floor(begin(y + 15) / 16) + (ceil(kernel_width / 16) + 1)
+            // For a block to be non-empty, intervals [16x, 16x+15] and [begin(16y), begin(16y+15)+taps] need to intersect
+            // begin(x) / 16
+            is_empty_block_y(x, y) = 
+                (x * block_size <= begin_of(block_size * y + block_size - 1) + kernel_taps) && 
+                begin_of(block_size * y) <= x * block_size + block_size - 1;
 
-        // xi and xo denote rows of the band kernel matrix
-        /*-------------------
-            |r___|__           |
-            |  |r___|__        |
-            |     |r___|       |
-            |        ...       |
-            |                  |
-            |                  |
-            |                  |
-            |                  |
-            -------------------
-        */
-        Expr offset_from_beginy = (xo * block_size + xi) - begin_of(yo * block_size + yi);
-        kernel_blocks_y(xi, yi, xo, yo) = 
-            select(0 <= offset_from_beginy && offset_from_beginy < kernel_taps, kernel_y(yo * block_size + yi, clamp(offset_from_beginy, 0, kernel_taps - 1)), 0);
+            // for y by 16
+            //    start_x = floor(begin(y) / 16)
+            //    end_x  = floor(begin(y + 15) / 16) + (ceil(kernel_width / 16) + 1)
 
-        ry = {0, block_size, 0, input.dim(1).extent() / 16, "ry"};
-        ry.where(is_empty_block_y(ry.y, yo));
-        resized_y(xi, yi, xo, yo, c) = 0.f;
-        resized_y(xi, yi, xo, yo, c) += 
-            cast<float>(kernel_blocks_y(ry.x, yi, ry.y, yo)) * 
-            cast<float>(as_float(xi + xo * block_size, ry.x + ry.y * block_size, c));
-        resized_yf16(xi, yi, xo, yo, c) = cast<float16_t>(resized_y(xi, yi, xo, yo, c));
+            // xi and xo denote rows of the band kernel matrix
+            /*-------------------
+                |r___|__           |
+                |  |r___|__        |
+                |     |r___|       |
+                |        ...       |
+                |                  |
+                |                  |
+                |                  |
+                |                  |
+                -------------------
+            */
+            Expr offset_from_beginy = (xo * block_size + xi) - begin_of(yo * block_size + yi);
+            kernel_blocks_y(xi, yi, xo, yo) = 
+                select(0 <= offset_from_beginy && offset_from_beginy < kernel_taps, kernel_y(yo * block_size + yi, clamp(offset_from_beginy, 0, kernel_taps - 1)), 0);
 
-        // -------------- original algorithm --------------
-        // resized_x(x, y, c) = 0.f;
-        // resized_x(x, y, c) += cast<float>(kernel_x(x, r)) * cast<float>(resized_y(r + beginx, y, c));
-        // ------------------------------------------------
+            ry = {0, block_size, 0, input.dim(1).extent() / 16, "ry"};
+            ry.where(is_empty_block_y(ry.y, yo));
+            resized_y(xi, yi, xo, yo, c) = 0.f;
+            resized_y(xi, yi, xo, yo, c) += 
+                cast<float>(kernel_blocks_y(ry.x, yi, ry.y, yo)) * 
+                cast<float>(as_float(xi + xo * block_size, ry.x + ry.y * block_size, c));
+            resized_yf16(xi, yi, xo, yo, c) = cast<float16_t>(resized_y(xi, yi, xo, yo, c));
 
-        // For a block to be non-empty, intervals [16y, 16y+15] and [begin(16x), begin(16x+15)+taps] need to intersect
-        is_empty_block_x(x, y) = 
-            (y * block_size <= begin_of(block_size * x + block_size - 1) + kernel_taps) && 
-            begin_of(block_size * x) <= y * block_size + block_size - 1;
+            // -------------- original algorithm --------------
+            // resized_x(x, y, c) = 0.f;
+            // resized_x(x, y, c) += cast<float>(kernel_x(x, r)) * cast<float>(resized_y(r + beginx, y, c));
+            // ------------------------------------------------
+
+            // For a block to be non-empty, intervals [16y, 16y+15] and [begin(16x), begin(16x+15)+taps] need to intersect
+            is_empty_block_x(x, y) = 
+                (y * block_size <= begin_of(block_size * x + block_size - 1) + kernel_taps) && 
+                begin_of(block_size * x) <= y * block_size + block_size - 1;
+            
+
+            // yi and yo denote columns of the band kernel matrix
+            /*-------------------
+                | |                |
+                |r|_               |
+                |_| |              |
+                | |r|_             |
+                | |_| |            |
+                |   |r|            |
+                |   |_|            |
+                |      ...         |
+                -------------------
+            */
+            Expr offset_from_beginx = (yo * block_size + yi) - begin_of(xo * block_size + xi);
+            // Need to clamp offset_from_beginx to ensure kernel_x is computed over an appropriate range
+            kernel_blocks_x(xi, yi, xo, yo) = 
+                select(0 <= offset_from_beginx && offset_from_beginx < kernel_taps, kernel_x(xo * block_size + xi, clamp(offset_from_beginx, 0, kernel_taps - 1)), 0);
+            
+            rx = {0, block_size, 0, input.dim(0).extent() / 16, "rx"};
+            rx.where(is_empty_block_x(xo, rx.y));
+            resized_x(xi, yi, xo, yo, c) = 0.f;
+            resized_x(xi, yi, xo, yo, c) += 
+                cast<float>(kernel_blocks_x(xi, rx.x, xo, rx.y)) * 
+                cast<float>(resized_yf16(rx.x, yi, rx.y, yo, c));
+
+            resized(x, y, c) = resized_x(x % block_size, y % block_size, x / block_size, y / block_size, c);
+        }
         
-
-        // yi and yo denote columns of the band kernel matrix
-        /*-------------------
-            | |                |
-            |r|_               |
-            |_| |              |
-            | |r|_             |
-            | |_| |            |
-            |   |r|            |
-            |   |_|            |
-            |      ...         |
-            -------------------
-        */
-        Expr offset_from_beginx = (yo * block_size + yi) - begin_of(xo * block_size + xi);
-        // Need to clamp offset_from_beginx to ensure kernel_x is computed over an appropriate range
-        kernel_blocks_x(xi, yi, xo, yo) = 
-            select(0 <= offset_from_beginx && offset_from_beginx < kernel_taps, kernel_x(xo * block_size + xi, clamp(offset_from_beginx, 0, kernel_taps - 1)), 0);
-        
-        rx = {0, block_size, 0, input.dim(0).extent() / 16, "rx"};
-        rx.where(is_empty_block_x(xo, rx.y));
-        resized_x(xi, yi, xo, yo, c) = 0.f;
-        resized_x(xi, yi, xo, yo, c) += 
-            cast<float>(kernel_blocks_x(xi, rx.x, xo, rx.y)) * 
-            cast<float>(resized_yf16(rx.x, yi, rx.y, yo, c));
-
-        resized(x, y, c) = resized_x(x % block_size, y % block_size, x / block_size, y / block_size, c);
-
         output(x, y, c) = clamp(resized(x, y, c), 0.0f, 1.0f);
     }
 
     void schedule() {
         const bool debug = false;
-
         // -------------- kernel_x --------------
         // unnormalized_kernel_x.reorder_storage(k, x);
         // kernel_x.reorder_storage(k, x);
@@ -289,107 +295,142 @@ public:
             .gpu_blocks(yo)
             .gpu_threads(yi);
 
-        // -------------- resized_y --------------
-        as_float // indexed in resized_y by xo and ry.y
-            .compute_root()
-            .tile(x, y, xo, yo, x, y, 16 * 8, 2 * 2, TailStrategy::RoundUp)
-            .tile(x, y, xi, yi, 16, 2)
-            .fuse(xi, yi, z)
-            .gpu_threads(z)
-            .gpu_blocks(xo, yo, c)
-            .reorder(x, y, z, xo, yo, c);
-        if (!debug) as_float.unroll(x).unroll(y);
+        if (gpu_schedule == Schedule::CUDA) {
+            Var xii("xii"), yii("yii");
+            resized_x.compute_root();
+            resized_x
+                .tile(x, y, xii, yii, 32, 8)
+                .tile(x, y, xi, yi, 8, 1)
+                .gpu_blocks(c, x, y)
+                .gpu_threads(xii, yii)
+                .reorder(xii, yii, xi, yi, x, y, c)
+                .unroll(xi)
+                .unroll(yi);
+            output
+                .tile(x, y, xii, yii, 32, 8)
+                .tile(x, y, xi, yi, 8, 1)
+                .gpu_blocks(c, x, y)
+                .gpu_threads(xii, yii)
+                .unroll(xi)
+                .unroll(yi);;
 
-        kernel_blocks_y // indexed in resized_y by yo and ry.y
-            .compute_at(resized_y, ry.y)
-            .fuse(xi, yi, z)
-            .split(z, zo, zi, 32)
-            // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi)
-            .gpu_threads(zi);
-        if (!debug) kernel_blocks_y.unroll(zo);
+            // resized_x
+            //     .compute_at(output, x)
+            //     .gpu_threads(x)
+            //     ;
+            // resized_y
+            //     .compute_at(output, yi)
+            //     .gpu_threads(x);
+            // output
+            //     .tile(x, y, xi, yi, 32, 32)
+            //     .gpu_blocks(y)
+            //     .gpu_blocks(c)
+            //     // .gpu_threads(yi)
+            //     .gpu_threads(xi)
+            //     ;
+        } else {
 
-        resized_y
-            .in()
-            .compute_at(resized_yf16, x)
-            .reorder(xi, yi, xo, c, yo)
-            .vectorize(xi, 16)
-            .vectorize(yi, 16);
-        resized_y
-            .compute_at(resized_yf16, y)
-            .store_in(MemoryType::WMMAAccumulator);
-        resized_y
-            .vectorize(xi, 16)
-            .vectorize(yi, 16);
-        resized_y
-            .update()
-            // yo and ry.y determines the kernel_blocks to be loaded
-            .reorder(ry.x, xi, yi, xo, c, ry.y, yo)
-            .atomic()
-            .vectorize(ry.x)
-            .vectorize(xi)
-            .vectorize(yi);
-        if (!debug) resized_y.unroll(c).unroll(xo).unroll(yo);
-        if (!debug) resized_y.update().unroll(c).unroll(xo).unroll(yo);
+            // -------------- resized_y --------------
+            as_float // indexed in resized_y by xo and ry.y
+                .compute_root()
+                .tile(x, y, xo, yo, x, y, 16 * 8, 2 * 2, TailStrategy::RoundUp)
+                .tile(x, y, xi, yi, 16, 2)
+                .fuse(xi, yi, z)
+                .gpu_threads(z)
+                .gpu_blocks(xo, yo, c)
+                .reorder(x, y, z, xo, yo, c);
+            if (!debug) as_float.unroll(x).unroll(y);
 
-        resized_yf16 // indexed in resized_x by rx.y and yo
-            .compute_root()
-            .tile(xo, yo, x, y, 2, 1)
-            .fuse(xi, yi, z)
-            .split(z, zo, zi, 32)
-            // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi, x, c, y, xo, yo)
-            .gpu_blocks(xo, yo)
-            .gpu_threads(zi);
-        if (!debug) resized_yf16.unroll(c).unroll(x).unroll(y).unroll(zo);
+            kernel_blocks_y // indexed in resized_y by yo and ry.y
+                .compute_at(resized_y, ry.y)
+                .fuse(xi, yi, z)
+                .split(z, zo, zi, 32)
+                // zi correspond to two 16-element contiguous vectors
+                .reorder(zo, zi)
+                .gpu_threads(zi);
+            if (!debug) kernel_blocks_y.unroll(zo);
 
-        // -------------- resized_x --------------
-        kernel_blocks_x // indexed in resized_x by rx.y and xo
-            .compute_at(resized_x, rx.y)
-            .fuse(xi, yi, z)
-            .split(z, zo, zi, 32)
-            // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi)
-            .gpu_threads(zi);
-        if (!debug) kernel_blocks_x.unroll(zo);
+            resized_y
+                .in()
+                .compute_at(resized_yf16, x)
+                .reorder(xi, yi, xo, c, yo)
+                .vectorize(xi, 16)
+                .vectorize(yi, 16);
+            resized_y
+                .compute_at(resized_yf16, y)
+                .store_in(MemoryType::WMMAAccumulator);
+            resized_y
+                .vectorize(xi, 16)
+                .vectorize(yi, 16);
+            resized_y
+                .update()
+                // yo and ry.y determines the kernel_blocks to be loaded
+                .reorder(ry.x, xi, yi, xo, c, ry.y, yo)
+                .atomic()
+                .vectorize(ry.x)
+                .vectorize(xi)
+                .vectorize(yi);
+            if (!debug) resized_y.unroll(c).unroll(xo).unroll(yo);
+            if (!debug) resized_y.update().unroll(c).unroll(xo).unroll(yo);
 
-        resized_x
-            .in()
-            .compute_at(output, y)
-            .reorder(xi, yi, yo, c, xo)
-            .vectorize(yi)
-            .vectorize(xi);
-        
-        resized_x
-            .compute_at(output, xo)
-            .store_in(MemoryType::WMMAAccumulator);
-        resized_x
-            .vectorize(yi, 16)
-            .vectorize(xi, 16);
-        resized_x
-            .update()
-            // xo and rx.y determines the kernel_blocks_x to load,
-            .reorder(rx.x, xi, yi, yo, c, rx.y, xo)
-            .atomic()
-            .vectorize(rx.x)
-            .vectorize(xi)
-            .vectorize(yi);
-        if (!debug) resized_x.unroll(c);
-        if (!debug) resized_x.update().unroll(c);
+            resized_yf16 // indexed in resized_x by rx.y and yo
+                .compute_root()
+                .tile(xo, yo, x, y, 2, 1)
+                .fuse(xi, yi, z)
+                .split(z, zo, zi, 32)
+                // zi correspond to two 16-element contiguous vectors
+                .reorder(zo, zi, x, c, y, xo, yo)
+                .gpu_blocks(xo, yo)
+                .gpu_threads(zi);
+            if (!debug) resized_yf16.unroll(c).unroll(x).unroll(y).unroll(zo);
 
-        // -------------- output --------------
-        auto& output_specialized = output;
-        output_specialized
-            .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
-            .tile(x, y, xo, yo, x, y, 1, 1)
-            .fuse(xi, yi, z)
-            .split(z, zo, zi, 32)
-            // zi correspond to two 16-element contiguous vectors
-            .reorder(zo, zi, y, c, x, xo, yo)
-            .gpu_threads(zi)
-            .gpu_blocks(yo, xo);
-        if (!debug) output_specialized.unroll(c).unroll(zo).unroll(x).unroll(y);
+            // -------------- resized_x --------------
+            kernel_blocks_x // indexed in resized_x by rx.y and xo
+                .compute_at(resized_x, rx.y)
+                .fuse(xi, yi, z)
+                .split(z, zo, zi, 32)
+                // zi correspond to two 16-element contiguous vectors
+                .reorder(zo, zi)
+                .gpu_threads(zi);
+            if (!debug) kernel_blocks_x.unroll(zo);
 
+            resized_x
+                .in()
+                .compute_at(output, y)
+                .reorder(xi, yi, yo, c, xo)
+                .vectorize(yi)
+                .vectorize(xi);
+            
+            resized_x
+                .compute_at(output, xo)
+                .store_in(MemoryType::WMMAAccumulator);
+            resized_x
+                .vectorize(yi, 16)
+                .vectorize(xi, 16);
+            resized_x
+                .update()
+                // xo and rx.y determines the kernel_blocks_x to load,
+                .reorder(rx.x, xi, yi, yo, c, rx.y, xo)
+                .atomic()
+                .vectorize(rx.x)
+                .vectorize(xi)
+                .vectorize(yi);
+            if (!debug) resized_x.unroll(c);
+            if (!debug) resized_x.update().unroll(c);
+
+            // -------------- output --------------
+            auto& output_specialized = output;
+            output_specialized
+                .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
+                .tile(x, y, xo, yo, x, y, 1, 1)
+                .fuse(xi, yi, z)
+                .split(z, zo, zi, 32)
+                // zi correspond to two 16-element contiguous vectors
+                .reorder(zo, zi, y, c, x, xo, yo)
+                .gpu_threads(zi)
+                .gpu_blocks(yo, xo);
+            if (!debug) output_specialized.unroll(c).unroll(zo).unroll(x).unroll(y);
+        }
 
         output.dim(0).set_stride(1);
         output.dim(0).set_min(0);
@@ -406,10 +447,13 @@ public:
         if (debug) {
             input.dim(0).set_extent(2048);
             input.dim(1).set_extent(2048);
-            output.dim(0).set_extent(int(2048 * 0.75));
-            output.dim(1).set_extent(int(2048 * 0.75));
+            output.dim(0).set_extent(int(2048 * 0.1));
+            output.dim(1).set_extent(int(2048 * 0.1));
             
             output.print_loop_nest();
+        } else {
+            // output.dim(0).set_extent(cast<int>(input.dim(0).extent() * scale_factor));
+            // output.dim(1).set_extent(cast<int>(input.dim(1).extent() * scale_factor));
         }
     }
 };
