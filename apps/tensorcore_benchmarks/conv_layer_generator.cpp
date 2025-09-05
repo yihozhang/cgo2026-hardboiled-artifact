@@ -17,7 +17,7 @@ public:
     GeneratorParam<int> N{"N", 128};
     GeneratorParam<int> H{"H", 64};
     GeneratorParam<int> W{"W", 64};
-    GeneratorParam<int> C{"C", 16};
+    GeneratorParam<int> C{"C", 128};
     GeneratorParam<int> kSize{"kSize", 3};
 
     // Inputs
@@ -40,12 +40,6 @@ public:
     }
 
     void schedule() {
-        /* THE SCHEDULE */
-
-        // MKL JITs code for the specific size and strides, so we'll
-        // do the same and ask Halide to compile for this specific
-        // size:
-
         int _C = C, _H = H, _W = W, _N = N, _kSize = kSize;
 
         output.dim(0).set_bounds(0, _C).set_stride(1);
@@ -53,17 +47,17 @@ public:
         output.dim(2).set_bounds(0, _H).set_stride(_C * _W);
         output.dim(3).set_bounds(0, _N).set_stride(_C * _H * _W);
 
-        input.dim(0).set_bounds(0, C).set_stride(1);
+        input.dim(0).set_bounds(0, _C).set_stride(1);
         input.dim(1).set_bounds(0, (_W + _kSize)).set_stride(_C);
         input.dim(2).set_bounds(0, (_H + _kSize)).set_stride(_C * (_W + _kSize));
         input.dim(3).set_bounds(0, _N).set_stride(_C * (_W + _kSize) * (_H + _kSize));
 
-        filter.dim(0).set_bounds(0, C).set_stride(1);
-        filter.dim(1).set_bounds(0, 3).set_stride(_C);
-        filter.dim(2).set_bounds(0, 3).set_stride(_C * _kSize);
+        filter.dim(0).set_bounds(0, _C).set_stride(1);
+        filter.dim(1).set_bounds(0, _kSize).set_stride(_C);
+        filter.dim(2).set_bounds(0, _kSize).set_stride(_C * _kSize);
         filter.dim(3).set_bounds(0, _C).set_stride(_C * _kSize * _kSize);
 
-        bias.dim(0).set_bounds(0, C).set_stride(1);
+        bias.dim(0).set_bounds(0, _C).set_stride(1);
 
         if (gpu_schedule == Schedule::CUDA) {
             // GPU schedule, tuned for a GTX 980. Seems to be good on
@@ -116,50 +110,44 @@ public:
                 .gpu_lanes(t)
                 .unroll(xo)
                 .unroll(_2);
-
-        } 
+        }
         else if (gpu_schedule == Schedule::TensorCore) {
-            Var xo("xo"), yo("yo"), co("co"), xi("xi"), yi("yi"), ci("ci"), t("t");
+            Var xi("xi"), xii("xii"), yi("yi"), yii("yii");
+            Var co("co"), ci("ci");
             RVar rkxo("rkxo"), rkxi("rkxi"), rtile("rtile");
-            const int tile_w = 16, tile_h = 1, tile_c = 16;
+            const int tile_w = 64, tile_h = 4, tile_c = 16, tile_r = 16;
 
             output
-                //.tile(x, y, xi, yi, tile_w, tile_h)
+                .split(y, y, yi, tile_h)
                 .split(x, x, xi, tile_w)
-                //.split(c, co, ci, tile_c)
-                //.reorder(ci, co, xi, yi, x, y, n)
-                .reorder(c, xi, x, y, n)
+                .split(xi, xi, xii, 16)
+                .split(c, co, ci, tile_c)
+                .reorder(ci, xii, xi, yi, co, x, y, n)
                 .gpu_blocks(x, y, n)
-                //.gpu_threads(xi, yi)
+                .vectorize(ci)
+                .vectorize(xii)
+                .unroll(xi, 4)
+                .unroll(yi, 4)
+                .unroll(co);
+            
+            conv.compute_at(output, co)
+                .store_in(MemoryType::WMMAAccumulator)
+                .split(x, x, xi, 16)
                 .vectorize(c)
                 .vectorize(xi)
-                ;
-            
-            conv.compute_at(output, x)
-                .store_in(MemoryType::WMMAAccumulator)
-                .vectorize(c)
-                .vectorize(x)
-                //.unroll(x)
-                //.unroll(y)
-                ;
-
+                .unroll(x, 4)
+                .unroll(y, 4);
+  
             conv.update()
-                .split(rk.x, rkxo, rkxi, 16)
-                .split(c, co, ci, 16)
-                .reorder(rkxi, ci, x, y, co, rkxo, rk.y, rk.z)
-                //.fuse(rkxo, rk.y, rtile)
-                //.fuse(rtile, rk.z, rtile)
+                .split(x, x, xi, 16)
+                .split(rk.x, rkxo, rkxi, tile_r)
+                .reorder(rkxi, c, x, y, rkxo, rk.y, rk.z)
                 .atomic()
-                .vectorize(ci)
-                .vectorize(x)
-                .vectorize(y)
+                .vectorize(c)
+                .vectorize(xi)
                 .vectorize(rkxi)
-                ;
-
-            //conv.update(1)
-              //  .vectorize(c)
-                //.vectorize(x)
-                ;
+                .unroll(x, 4)
+                .unroll(y, 4);
         }
     }
 

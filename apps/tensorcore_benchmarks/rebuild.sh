@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+set -x
 
 # Default values
 BENCHMARK="conv1d"
@@ -29,7 +30,7 @@ show_help() {
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
     echo "  -conv_col,  --img-cols IMG_COL          Image width (3840) [default: 3840]"
     echo "  -conv_row,  --img-rows IMG_ROW          Image height (2160) [default: 2160]"
-    echo "  -nhwc,      --nhwc N,H,W,C            Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
+    echo "  -nhwc,      --nhwc N H W C              Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
     echo "  -mm_m,      --matmul-m MATMUL_M         Rows of the input matrix A [default: 4096]"
     echo "  -mm_n,      --matmul-n MATMUL_N         Columns of the input matrix B [default: 4096]"
     echo "  -mm_k,      --matmul-k MATMUL_K         Columns of the input matrix A / Rows of the input matrix B [default: 4096]"

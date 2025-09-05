@@ -317,7 +317,7 @@ int main(int argc, char **argv) {
     Buffer<float> output(C, W, H, N);
 
     // Call the generated function
-    auto time = benchmark(5, 5, [&]() {
+    auto time = benchmark(100, 5, [&]() {
         conv_layer(input, filter, bias, output);
         output.device_sync();
     });

@@ -31,10 +31,11 @@ benchmarks = [
     #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 
     # Conv Layer (NHWC)
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 16], "-v": True},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": False},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 64], "-v": False},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 128], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [256, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [2048, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [4096, 64, 64, 32], "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [8192, 64, 64, 32], "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
