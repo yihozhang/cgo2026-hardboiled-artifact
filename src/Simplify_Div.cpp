@@ -209,6 +209,12 @@ Expr Simplify::visit(const Div *op, ExprInfo *info) {
                        c0 * c1 <= c2 &&
                        can_prove(x % broadcast(c2, lanes_of(x)) == 0, this))
                        )) ||
+               // Another variant (TODO: generalize)
+               rewrite(ramp(x, c0, c1) / broadcast(c2, lanes),
+                       broadcast(x / broadcast(c2, lanes_of(x)), c1),
+                       c2 % (c0 * c1) == 0 &&
+                       can_prove(x % fold(broadcast(c0 * c1, lanes_of(x))) == broadcast(0, lanes_of(x)), this)) ||
+
              (no_overflow_scalar_int(op->type) &&
               (rewrite(x / -1, -x) ||
                (denominator_non_zero && rewrite(c0 / y, select(y < 0, fold(-c0), c0), c0 == -1)) ||

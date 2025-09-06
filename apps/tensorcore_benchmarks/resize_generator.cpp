@@ -39,10 +39,12 @@ Expr sinc(Expr x) {
     return sin(x) / x;
 }
 
+constexpr int lanczos_lobes = 3;
+
 Expr kernel_lanczos(Expr x) {
-    Expr value = sinc(x) * sinc(x / 5);
-    value = select(x == 0.0f, 1.0f, value);        // Take care of singularity at zero
-    value = select(x > 5 || x < -5, 0.0f, value);  // Clamp to zero out of bounds
+    Expr value = sinc(x) * sinc(x / lanczos_lobes);
+    value = select(x == 0.0f, 1.0f, value);                                // Take care of singularity at zero
+    value = select(x > lanczos_lobes || x < -lanczos_lobes, 0.0f, value);  // Clamp to zero out of bounds
     return value;
 }
 
@@ -56,7 +58,7 @@ static KernelInfo kernel_info[] = {
     {"box", 1, kernel_box},
     {"linear", 2, kernel_linear},
     {"cubic", 4, kernel_cubic},
-    {"lanczos", 10, kernel_lanczos}};
+    {"lanczos", 2 * lanczos_lobes, kernel_lanczos}};
 
 class Resize : public Halide::Generator<Resize> {
 public:
@@ -234,11 +236,6 @@ public:
 
         Var xii{"xii"}, yii{"yii"};
 
-        resized_y_f16
-            .compute_root()
-            .align_bounds(x, 16)
-            .align_bounds(y, 16);
-
         output
             .compute_root()
             .align_bounds(x, 16)
@@ -251,6 +248,9 @@ public:
             // the image doesn't depend on y % 16, so we can schedule it like a
             // matrix multiply (i.e. tile it).
             resized_y_f16
+                .compute_root()
+                .align_bounds(x, 16)
+                .align_bounds(y, 16)
                 .reorder(c, x, y)
                 .unroll(c)
                 .gpu_tile(x, y, xi, yi, 64, 32, TailStrategy::RoundUp)  // TODO: Try 128x4
@@ -298,61 +298,70 @@ public:
             // kernel_x.reorder_storage(k, x);
             kernel_y.reorder_storage(k, y);
 
-            resized_y_f16
-                .compute_root()
-                .reorder(x, y)
-                .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
-                .split(yi, yi, yii, 2)
-                .reorder(xi, yii, yi, c, x, y)
-                .gpu_blocks(x, y)
-                .fuse(xi, yii, z)
-                .gpu_lanes(z)
-                .unroll(yi);
-
+            Var xii{"xii"}, yii{"yii"};
             resized_y.in()
-                .compute_at(resized_y_f16, x)
+                .compute_root()
+                .align_bounds(x, 16)
+                .align_bounds(y, 16)
+                .tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)
                 .unroll(c)
-                .vectorize(x)
-                .vectorize(y);
+                .split(xi, xi, xii, 32)
+                .split(yi, yi, yii, 8)
+                .reorder(xii, yii, c, yi, xi, x, y)
+                .vectorize(xii)
+                .vectorize(yii)
+                .unroll(yi)
+                .gpu_threads(xi)
+                .gpu_blocks(x, y);
 
-            resized_y.compute_at(resized_y_f16, x)
+            resized_y.compute_at(resized_y.in(), xi)
                 .store_in(MemoryType::WMMAAccumulator)
                 .unroll(c)
                 .vectorize(x)
-                .vectorize(y)
+                .vectorize(y, 8)
+                .unroll(y)
                 .update()
                 .atomic()
                 .unroll(c)
                 .vectorize(x)
-                .vectorize(y)
+                .vectorize(y, 8)
+                .unroll(y)
                 .vectorize(r, 16)
                 .reorder(c, r);
 
-            // as_float.compute_at(resized_y_f16, x);
-            // kernel_y.in().compute_at(resized_y_f16, x);
-            // resized_y.in().compute_at(resized_y_f16, x);
-
-            ///
             output
-                .gpu_threads(c)
-                .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
-                .reorder(xi, yi, c, x, y)
-                .tile(xi, yi, xii, yii, 2, 2)
-                .vectorize(xii)
-                .unroll(yii);
+                .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
+                .reorder(yi, xi, x, y, c)
+                .gpu_blocks(x, y, c)
+                .split(yi, yi, yii, 2)
+                .fuse(xi, yii, z)
+                .gpu_lanes(z)
+                .unroll(yi);
 
+            resized_x.in()
+                .compute_at(output, x)
+                //.gpu_threads(c)
+                .vectorize(x)
+                .vectorize(y);
+
+            RVar ri, ro;
             resized_x
-                .compute_at(output, xi)
-                .unroll(c)
-                .unroll(x)
-                .unroll(y)
+                .store_in(MemoryType::WMMAAccumulator)
+                .compute_at(resized_x.in(), c)
+                .vectorize(x)
+                .vectorize(y)
                 .update()
-                .reorder(x, y, c, r)
-                .unroll(c)
-                .unroll(x)
-                .unroll(y);
-            resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
-            kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
+                .atomic()
+                .split(r, ro, ri, 16)
+                .reorder(ri, x, y, ro)
+                .vectorize(x)
+                .vectorize(y)
+                .vectorize(ri);
+
+            resized_y_f16.compute_at(output, x)
+                .store_in(MemoryType::GPUShared)
+                .split(x, xo, xi, 32, TailStrategy::RoundUp)
+                .gpu_lanes(xi);
         }
 
         output.dim(0).set_min(0);

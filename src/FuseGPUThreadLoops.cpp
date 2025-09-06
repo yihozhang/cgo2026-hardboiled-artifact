@@ -198,7 +198,7 @@ class ReplaceForWithIf : public IRMutator {
                 }
             }
 
-            internal_assert(dim >= 0 && dim < block_size.threads_dimensions());
+            internal_assert(dim >= 0 && dim < block_size.threads_dimensions()) << op->name << " " << block_size.threads_dimensions() << "\n";
 
             Stmt body = mutate(op->body);
 
@@ -930,7 +930,7 @@ public:
                             {"wmma.load.b.sync.aligned.row.m32n8k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m32n8k16.f32", {0, 2}},
                             {"wmma.store.d.sync.aligned.row.m32n8k16.f32", {0, 2}},
-                            
+
                             {"wmma.load.a.sync.aligned.row.m8n32k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m8n32k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m8n32k16.f32", {0, 2}},

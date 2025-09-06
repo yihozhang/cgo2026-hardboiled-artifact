@@ -2,6 +2,7 @@
 #include "HalideRuntime.h"
 #include "HalideRuntimeCuda.h"
 #include "halide_benchmark.h"
+#include "halide_image_io.h"
 
 #include <cmath>
 #include <cstdlib>  // for rand()
@@ -443,8 +444,8 @@ int main(int argc, char **argv) {
     const int M = IMG_COL;
     const int N = IMG_ROW;
     const int C = 3;
-    // const std::vector<float> scales = {0.75, 1.5};
-    const std::vector<float> scales = {0.139};  //, 0.25, 0.75, 0.9, 0.99, 1.01, 1.1, 1.5, 2., 2.5, 4};
+
+    const std::vector<float> scales = {0.07, 0.12, 0.25, 0.75, 0.9, 0.99};  //, 1.01, 1.1, 1.5, 2., 2.5, 4};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
@@ -457,12 +458,21 @@ int main(int argc, char **argv) {
         const int OM = M * scale;
         const int ON = N * scale;
 
-        // Create matrix buffers with random values
+        // Make a pinwheel so that the quality of the resample is apparent
         Buffer<uint16_t, 3> img(M, N, C);
+        int R = std::min(M, N) / 2 - 10;
         FOR(c, C) {
             FOR(y, N) {
+                double dy = y - N / 2 + 0.5 / scale;
                 FOR(x, M) {
-                    img(x, y, c) = float_to_float16(float(rand() % 100) / 100.f);
+                    double dx = x - M / 2 + 0.5 / scale;
+                    if (dx * dx + dy * dy > R * R) {
+                        img(x, y, c) = float_to_float16(0.5f);
+                    } else {
+                        double theta = atan2(dy, dx);
+                        bool white = ((int)((theta / M_PI + 1) * 300 + 0.5)) & 1;
+                        img(x, y, c) = white ? float_to_float16(1.0f) : float_to_float16(0.f);
+                    }
                 }
             }
         }
@@ -486,6 +496,17 @@ int main(int argc, char **argv) {
             output.copy_to_host();
         }
         output.device_sync();
+
+        Buffer<uint8_t, 3> output_8(OM, ON, C);
+        FOR(c, C) {
+            FOR(y, ON) {
+                FOR(x, OM) {
+                    float f = float16_to_float(output(x, y, c));
+                    output_8(x, y, c) = (uint8_t)(f * 255.999f);
+                }
+            }
+        }
+        Halide::Tools::save_image(output_8, "pinwheel_" + std::to_string(scale) + ".png");
 
         std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
@@ -553,10 +574,12 @@ float sinc(float x) {
     return sin(x) / x;
 }
 
+constexpr int lanczos_lobes = 3;
+
 float lanczos(float x) {
-    float value = sinc(x) * sinc(x / 5);
-    value = x == 0.0f ? 1.0f : value;          // Take care of singularity at zero
-    value = (x > 5 || x < -5) ? 0.0f : value;  // Clamp to zero out of bounds
+    float value = sinc(x) * sinc(x / lanczos_lobes);
+    value = x == 0.0f ? 1.0f : value;                                  // Take care of singularity at zero
+    value = (x > lanczos_lobes || x < -lanczos_lobes) ? 0.0f : value;  // Clamp to zero out of bounds
     return value;
 }
 
@@ -565,7 +588,7 @@ float clamp(float x, float l, float h) {
 }
 
 void resize_sim(uint16_t *input, uint16_t *output, int m, int n, int C, float scale_factor) {
-    const int taps = 10;
+    const int taps = 2 * lanczos_lobes;
     bool upsample = scale_factor > 1.0f;
 
     float inverse_scale_factor = 1.0f / scale_factor;
