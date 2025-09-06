@@ -72,12 +72,9 @@ class CountGPUBlocksThreads : public IRVisitor {
         int dl = op->memory_type == MemoryType::WMMAAccumulator;
 
         nl += dl;
-        nt += dl;
-        nthreads = std::max(nt, nthreads);
         nlanes = std::max(nl, nlanes);
         IRVisitor::visit(op);
         nl -= dl;
-        nt -= dl;
     }
 
 public:

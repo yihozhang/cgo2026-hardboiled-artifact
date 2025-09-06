@@ -232,61 +232,128 @@ public:
             .compute_root()
             .gpu_tile(y, yi, 32);
 
-        // For large downsamples, this is the expensive stage. When resizing in
-        // y, the load from the kernel doesn't depend on x and c, and the load from
-        // the image doesn't depend on y % 16, so we can schedule it like a
-        // matrix multiply (i.e. tile it).
         Var xii{"xii"}, yii{"yii"};
+
         resized_y_f16
             .compute_root()
             .align_bounds(x, 16)
-            .align_bounds(y, 16)
-            .reorder(c, x, y)
-            .unroll(c)
-            .gpu_tile(x, y, xi, yi, 64, 32, TailStrategy::RoundUp)
-            .tile(xi, yi, xii, yii, 4, 4)
-            .unroll(xii)
-            .unroll(yii);
-        resized_y
-            .compute_at(resized_y_f16, xi)
-            .unroll(c)
-            .unroll(x)
-            .unroll(y)
-            .update()
-            .reorder(x, y, c, r)
-            .unroll(c)
-            .unroll(x)
-            .unroll(y);
-        as_float.compute_at(resized_y, c).vectorize(x).vectorize(y);
-        kernel_y.in().compute_at(resized_y, r).vectorize(y).vectorize(k);
+            .align_bounds(y, 16);
 
-        // For large downsamples, it's hard to fill the machine, because we've
-        // already downsampled in y. We'll use much smaller tiles and map color
-        // channels to gpu threads instead of unrolling them.
         output
             .compute_root()
             .align_bounds(x, 16)
-            .align_bounds(y, 16)
-            .never_partition(x, y)
-            .gpu_threads(c)
-            .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
-            .reorder(xi, yi, c, x, y)
-            .tile(xi, yi, xii, yii, 2, 2)
-            .vectorize(xii)
-            .unroll(yii);
+            .align_bounds(y, 16);
 
-        resized_x
-            .compute_at(output, xi)
-            .unroll(c)
-            .unroll(x)
-            .unroll(y)
-            .update()
-            .reorder(x, y, c, r)
-            .unroll(c)
-            .unroll(x)
-            .unroll(y);
-        resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
-        kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
+        switch (gpu_schedule) {
+        case Schedule::CUDA:
+            // For large downsamples, this is the expensive stage. When resizing in
+            // y, the load from the kernel doesn't depend on x and c, and the load from
+            // the image doesn't depend on y % 16, so we can schedule it like a
+            // matrix multiply (i.e. tile it).
+            resized_y_f16
+                .reorder(c, x, y)
+                .unroll(c)
+                .gpu_tile(x, y, xi, yi, 64, 32, TailStrategy::RoundUp)  // TODO: Try 128x4
+                .tile(xi, yi, xii, yii, 4, 4)
+                .unroll(xii)
+                .unroll(yii);
+            resized_y
+                .compute_at(resized_y_f16, xi)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .update()
+                .reorder(x, y, c, r)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y);
+            as_float.compute_at(resized_y, c).vectorize(x).vectorize(y);
+            kernel_y.in().compute_at(resized_y, r).vectorize(y).vectorize(k);
+
+            // For large downsamples, it's hard to fill the machine, because we've
+            // already downsampled in y. We'll use much smaller tiles and map color
+            // channels to gpu threads instead of unrolling them.
+            output
+                .gpu_threads(c)
+                .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
+                .reorder(xi, yi, c, x, y)
+                .tile(xi, yi, xii, yii, 2, 2)
+                .vectorize(xii)
+                .unroll(yii);
+
+            resized_x
+                .compute_at(output, xi)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .update()
+                .reorder(x, y, c, r)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y);
+            resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
+            kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
+            break;
+        case Schedule::TensorCore:
+            // kernel_x.reorder_storage(k, x);
+            kernel_y.reorder_storage(k, y);
+
+            resized_y_f16
+                .compute_root()
+                .reorder(x, y)
+                .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
+                .split(yi, yi, yii, 2)
+                .reorder(xi, yii, yi, c, x, y)
+                .gpu_blocks(x, y)
+                .fuse(xi, yii, z)
+                .gpu_lanes(z)
+                .unroll(yi);
+
+            resized_y.in()
+                .compute_at(resized_y_f16, x)
+                .unroll(c)
+                .vectorize(x)
+                .vectorize(y);
+
+            resized_y.compute_at(resized_y_f16, x)
+                .store_in(MemoryType::WMMAAccumulator)
+                .unroll(c)
+                .vectorize(x)
+                .vectorize(y)
+                .update()
+                .atomic()
+                .unroll(c)
+                .vectorize(x)
+                .vectorize(y)
+                .vectorize(r, 16)
+                .reorder(c, r);
+
+            // as_float.compute_at(resized_y_f16, x);
+            // kernel_y.in().compute_at(resized_y_f16, x);
+            // resized_y.in().compute_at(resized_y_f16, x);
+
+            ///
+            output
+                .gpu_threads(c)
+                .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
+                .reorder(xi, yi, c, x, y)
+                .tile(xi, yi, xii, yii, 2, 2)
+                .vectorize(xii)
+                .unroll(yii);
+
+            resized_x
+                .compute_at(output, xi)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .update()
+                .reorder(x, y, c, r)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y);
+            resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
+            kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
+        }
 
         output.dim(0).set_min(0);
         output.dim(1).set_min(0);

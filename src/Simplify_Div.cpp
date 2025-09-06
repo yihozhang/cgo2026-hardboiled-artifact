@@ -71,7 +71,11 @@ Expr Simplify::visit(const Div *op, ExprInfo *info) {
         // clang-format off
         if (EVAL_IN_LAMBDA
             (rewrite(c0 / c1, fold(c0 / c1)) ||
+
              rewrite(broadcast(x, c0) / broadcast(y, c0), broadcast(x / y, c0)) ||
+             rewrite(broadcast(x, c0) / broadcast(y, c1), broadcast(x / broadcast(y, fold(c1 / c0)), c0), c1 % c0 == 0) ||
+             rewrite(broadcast(y, c1) / broadcast(x, c0), broadcast(broadcast(y, fold(c1 / c0)) / x, c0), c1 % c0 == 0) ||
+
              rewrite(select(x, c0, c1) / c2, select(x, fold(c0/c2), fold(c1/c2))) ||
              (!op->type.is_float() &&
               rewrite(x / x, select(x == 0, 0, 1))) ||
@@ -198,7 +202,12 @@ Expr Simplify::visit(const Div *op, ExprInfo *info) {
                rewrite(ramp(x, c0, lanes) / broadcast(c1, lanes), ramp(x / c1, fold(c0 / c1), lanes), (c0 % c1 == 0)) ||
                rewrite(ramp(x, c0, lanes) / broadcast(c1, lanes), broadcast(x / c1, lanes),
                        // First and last lanes are the same when...
-                       can_prove((x % c1 + c0 * (lanes - 1)) / c1 == 0, this))
+                       can_prove((x % c1 + c0 * (lanes - 1)) / c1 == 0, this)) ||
+               // A variant for ramps with a vector base
+               rewrite(ramp(x, c0, c1) / broadcast(c2, lanes),
+                       broadcast(x / broadcast(c2, lanes_of(x)), c1),
+                       c0 * c1 <= c2 &&
+                       can_prove(x % broadcast(c2, lanes_of(x)) == 0, this))
                        )) ||
              (no_overflow_scalar_int(op->type) &&
               (rewrite(x / -1, -x) ||
