@@ -90,7 +90,7 @@ $(GENERATOR_BIN)/rec_filter.generator: rec_filter_generator.cpp $(GENERATOR_DEPS
 .PRECIOUS: $(BIN)/%/rec_filter.a
 $(BIN)/%/rec_filter.a: $(GENERATOR_BIN)/rec_filter.generator
 	@mkdir -p $(@D)
-	$^ -g rec_filter -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f rec_filter target=$(HL_TARGET) gpu_schedule=$* imgCol=1048576
+	$^ -g rec_filter -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f rec_filter target=$(HL_TARGET) gpu_schedule=$* imgCol=1048576 order=2
 
 $(BIN)/%/rec_filter: process.cpp $(BIN)/%/rec_filter.a 
 	@mkdir -p $(@D)

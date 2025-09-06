@@ -367,13 +367,17 @@ int main(int argc, char **argv) {
     img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
     // Create output buffer
-    Buffer<float> output(16, M/16, N);
-
+    Buffer<float> output(16, 64, M/16/64, N);
+    Buffer<float> coeff(4);
     float a = 0.9, b = -0.45;
+    coeff(0) = 0;
+    coeff(1) = a;
+    coeff(2) = b;
+    coeff(3) = 0;
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
         // NB: Hardcode the coefficients for now
-        rec_filter(img.raw_buffer(), 0, a, b, output.raw_buffer());
+        rec_filter(img.raw_buffer(), coeff, output.raw_buffer());
         output.device_sync();
     });
 
@@ -419,10 +423,10 @@ int main(int argc, char **argv) {
                 expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
                     (x > 0 ? expected[x-1][y] * a : 0.f) + 
                     (x > 1 ? expected[x-2][y] * b : 0.f);
-                if (fabs(expected[x][y] - output(x%16,x/16, y)) > 0.001f) {
+                if (fabs(expected[x][y] - output(x%16,(x/16)%64, x/16/64, y)) > 0.001f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
-                              << output(x%16,x/16, y) << " != " << expected[x][y] << "\n";
+                              << output(x%16,(x/16)%64, x/16/64, y) << " != " << expected[x][y] << "\n";
                     success = false;
                 }
             }
