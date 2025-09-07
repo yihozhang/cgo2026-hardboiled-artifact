@@ -5,8 +5,8 @@ include ../support/Makefile.inc
 KERNEL_SIZE ?= 16
 
 all: all_cuda_only all_tensorcore
-all_cuda_only: $(BIN)/cuda_only/matmul $(BIN)/cuda_only/conv1d $(BIN)/cuda_only/conv2d $(BIN)/cuda_only/downsample $(BIN)/cuda_only/upsample $(BIN)/cuda_only/resize
-all_tensorcore: $(BIN)/tensorcore/matmul $(BIN)/tensorcore/conv1d $(BIN)/tensorcore/conv2d $(BIN)/tensorcore/downsample $(BIN)/tensorcore/upsample $(BIN)/tensorcore/resize
+all_cuda_only: $(BIN)/cuda_only/matmul $(BIN)/cuda_only/conv1d $(BIN)/cuda_only/conv2d $(BIN)/cuda_only/downsample $(BIN)/cuda_only/upsample $(BIN)/cuda_only/resize $(BIN)/cuda_only/denosie
+all_tensorcore: $(BIN)/tensorcore/matmul $(BIN)/tensorcore/conv1d $(BIN)/tensorcore/conv2d $(BIN)/tensorcore/downsample $(BIN)/tensorcore/upsample $(BIN)/tensorcore/resize $(BIN)/tensorcore/denoise
 clean:
 	rm -rf $(BIN)
 
@@ -64,6 +64,19 @@ $(BIN)/%/downsample.a: $(GENERATOR_BIN)/downsample.generator
 $(BIN)/%/downsample: process.cpp $(BIN)/%/downsample.a 
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/downsample.h\"" -DBENCHMARK_NAME="\"downsample\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_downsample
+
+$(GENERATOR_BIN)/denoise.generator: denoise_generator.cpp $(GENERATOR_DEPS)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ $(LIBHALIDE_LDFLAGS)
+
+.PRECIOUS: $(BIN)/%/denoise.a
+$(BIN)/%/denoise.a: $(GENERATOR_BIN)/denoise.generator
+	@mkdir -p $(@D)
+	$^ -g denoise -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f denoise target=$(HL_TARGET) gpu_schedule=$*
+
+$(BIN)/%/denoise: process.cpp $(BIN)/%/denoise.a 
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/denoise.h\"" -DBENCHMARK_NAME="\"denoise\"" -DIMG_ROW=2048 -DIMG_COL=2048 -DSCHEDULE="\"$*\"" -DVERIFY_OUTPUT=true -DRUN_denoise
 
 $(GENERATOR_BIN)/resize.generator: resize_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)

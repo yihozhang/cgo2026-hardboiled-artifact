@@ -271,6 +271,59 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#elif defined(RUN_denoise)
+
+    Buffer<uint16_t> img(IMG_COL, IMG_ROW, 3), out(IMG_COL - 16, IMG_ROW - 16, 3);
+    for (int c = 0; c < img.channels(); c++) {
+        for (int y = 0; y < img.height(); y++) {
+            for (int x = 0; x < img.width(); x++) {
+                float noise = (rand() & 65535) / 65535.f - 0.5f;
+                // Break the image into large squares, with a different constant
+                // value per square.
+                uint64_t hash = c + (x / 20) + (y / 20) * 3;
+                float signal = (hash & 7) / 8.f;
+                img(x, y, c) = float_to_float16(std::max(0.f, std::min(1.f, signal + 0.1f * noise)));
+            }
+        }
+    }
+
+    img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+    out.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+    auto time = benchmark(5, 5, [&]() {
+        denoise(img.raw_buffer(), 0.1, out.raw_buffer());
+        out.device_sync();
+    });
+
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
+
+    out.copy_to_host();
+
+    // At a strength of zero, the output should approximately equal the input
+    double total_error = 0.0;
+    for (int c = 0; c < out.channels(); c++) {
+        for (int y = 0; y < out.height(); y++) {
+            for (int x = 0; x < out.width(); x++) {
+                float output = float16_to_float(out(x, y, c));
+                float correct = float16_to_float(img(x + 8, y + 8, c));
+                total_error += output - correct;
+            }
+        }
+    }
+
+    Buffer<uint8_t, 3> out_8(out.width(), out.height(), 3);
+    Buffer<uint8_t, 3> img_8(img.width(), img.height(), 3);
+    out_8.for_each_value([](uint8_t &v, uint16_t v16) { v = float16_to_float(v16) * 255.999f; }, out);
+    img_8.for_each_value([](uint8_t &v, uint16_t v16) { v = float16_to_float(v16) * 255.999f; }, img);
+    Halide::Tools::save_image(img_8, "denoised_img.png");
+    Halide::Tools::save_image(out_8, "denoised_out.png");
+
+    total_error /= (out.width() * out.height() * out.channels());
+    if (total_error > 0.01) {
+        std::cout << "Warning: Average absolute error per pixel is high: " << total_error << "\n";
+        return -1;
+    }
+
 #elif defined(RUN_matmul)
     // Create test data using compile-time definitions
     const int M = MATMUL_M;
