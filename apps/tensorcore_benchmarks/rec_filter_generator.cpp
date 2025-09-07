@@ -6,8 +6,6 @@
 
 using namespace Halide;
 
-constexpr int delay_factor = 16;
-const int tile_width = 64;
 class RecFilter : public Halide::Generator<RecFilter> {
 public:
     // Generator Params
@@ -18,9 +16,19 @@ public:
     // Inputs
     Input<Buffer<float16_t>> g{"g", 2}; // inputs
     Input<Buffer<float>> a{"a", 1}; // coefficients
-    Output<Buffer<float>> f{"f", 4};
+    Output<Buffer<float>> f{"f"};
+
+    
+    int delay_factor = 16;
+    int tile_width = 64 * 16;
 
     void generate() {
+        if (gpu_schedule == Schedule::CUDA) {
+            // Keep them the same for now
+            tile_width = 64 * 16;
+        } else {
+            tile_width = 64 * 16;
+        }
         /*---------------------------------*
         |  Compute A and B                 |
         *---------------------------------*/
@@ -33,130 +41,191 @@ public:
         //             if (j + o <= order)
         //                 a1(o, i) += a1(0, i - j) * cast<float>(a[j + o]);
         RDom r_init(
-            1, delay_factor * tile_width,
-            1, delay_factor * tile_width,
+            1, tile_width,
+            1, tile_width,
             0, order,
             "r_init"
         );
         r_init.where(r_init.x <= r_init.y);
         r_init.where(r_init.x + r_init.z <= order);
         
-        a1(r_init.z, r_init.y) += a1(0, r_init.y - r_init.x) * cast<float>(a(r_init.x + r_init.z));
+        a1(r_init.z, r_init.y) += a1(0, max(r_init.y - r_init.x, 0)) * cast<float>(a(clamp(r_init.x + r_init.z, 1, order)));
 
-        wA = {0, delay_factor, 0, delay_factor, "wA"};
-        wB = {0, delay_factor, 0, order, "wB"};
-        A(m, n) = cast<float16_t>(0);
-        A(wA.x, wA.y) = select(wA.y <= wA.x, cast<float16_t>(a1(0, wA.x - wA.y)), cast<float16_t>(0));
-        B(n, m) = a1(m, n + 1);
+        if (gpu_schedule == Schedule::CUDA) {
+            // r = {
+            //     0, order,
+            //     1, tile_width - 1,
+            //     "r"
+            // };
+            // r.where(r.y - r.x - 1 >= 0);
+            // fi(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
+            // fi(r.y, mo, n) += a(r.x + 1) * fi(r.y - r.x - 1, mo, n);
 
-        /*---------------------------------*
-        | Computes the non-recursive part  |
-        *---------------------------------*/
-        g_delay(mii, mi, mo, n) = g((mo * delay_factor + mi) * delay_factor + mii, n);
+            r = {
+                0, tile_width,
+                1, tile_width - 1,
+                "r"
+            };
+            r.where(1 <= r.y - r.x && r.y - r.x <= order);
+            fi(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
+            fi(r.y, mo, n) += a(clamp(r.y - r.x, 1, order)) * fi(r.x, mo, n);
 
-        h(mii, mi, mo, n) = cast<float>(0.f);
-        h(mii, mi, mo, n) += cast<float>(A(mii, w)) * cast<float>(g_delay(w, mi, mo, n));
+            r_tail = {
+                0, order,
+                tile_width - order, order,
+                1, imgCol / tile_width - 1,
+                "r_tail",
+            };
+            fct(mi, mo, n) = fi(mi, mo, n);
+            fct(r_tail.y, r_tail.z, n) += a1(r_tail.x, r_tail.y + 1) * fct(tile_width - r_tail.x - 1, r_tail.z - 1, n);
 
-        /*---------------------------------*
-        | Computes the recursive part      |
-        *---------------------------------*/
-        f_initial(mii, m, n) = h(mii, m % delay_factor, m / delay_factor, n);
+            // Mins, maxs, and clamps here are for bound inference
+            in_tile = {
+                0, order,
+                0, order,
+                "in_tile"
+            };
+            f(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
+            f(in_tile.y, mo, n) += a(in_tile.x + 1) * 
+                select(in_tile.y > in_tile.x, 
+                    f(max(in_tile.y - in_tile.x - 1, 0), mo, n),                 
+                    select(mo > 0, fct(tile_width + min(in_tile.y - in_tile.x, 0) - 1, mo - 1, n), 0)
+                );
+            r2 = {
+                0, order,
+                order, tile_width - order,
+                "r2"
+            };
+            f(r2.y, mo, n) += a(r2.x + 1) * f(r2.y - r2.x - 1, mo, n);
+        } else {
+            wA = {0, delay_factor, 0, delay_factor, "wA"};
+            wB = {0, delay_factor, 0, order, "wB"};
+            A(m, n) = cast<float16_t>(0);
+            A(wA.x, wA.y) = select(wA.y <= wA.x, cast<float16_t>(a1(0, wA.x - wA.y)), cast<float16_t>(0));
+            B(n, m) = a1(m, n + 1);
 
-        // First intra-tile
-        r = {0, order,
-             0, delay_factor,
-             // second arg is extent not upper bound
-             1, tile_width - 1,
-             "r"};
-        fi(mii, mi, mo, n) = f_initial(mii, mo * tile_width + mi, n);
-        fi(r.y, r.z, mo, n) += B(r.y, r.x) * fi(delay_factor - r.x - 1, r.z - 1, mo, n);
+            /*---------------------------------*
+            | Computes the non-recursive part  |
+            *---------------------------------*/
+            g_delay(mii, mi, mo, n) = g((mo * delay_factor + mi) * delay_factor + mii, n);
 
-        // Inter-tile
-        r_tail = {
-            0, order,
-            0, delay_factor,
-            1, imgCol / tile_width / delay_factor - 1,
-            "rt"
-        };
-        fct(mii, mo, n) = fi(mii, tile_width - 1, mo, n);
-        fct(r_tail.y, r_tail.z, n) += a1(r_tail.x, (delay_factor - 1) * tile_width + r_tail.y) * fct(delay_factor - r_tail.x - 1, r_tail.z - 1, n);
+            h(mii, mi, mo, n) = cast<float>(0.f);
+            h(mii, mi, mo, n) += cast<float>(A(mii, w)) * cast<float>(g_delay(w, mi, mo, n));
 
-        // Final intra-tile
-        in_tile = {
-            0, order,
-            // 1, imgCol / tile_width / delay_factor - 1,
-            "in_tile"
-        };
-        f(mii, mi, mo, n) = f_initial(mii, mo * tile_width + mi, n);
-        // f_delay(mii, 0, in_tile.y, n) += a1(in_tile.x, mii) * fct(delay_factor - in_tile.x - 1, in_tile.y - 1, n);
-        f(mii, 0, mo, n) += select(mo > 0, a1(in_tile.x, mii + 1) * fct(delay_factor - in_tile.x - 1, mo - 1, n), 0);
-        f(r.y, r.z, mo, n) += B(r.y, r.x) * f(delay_factor - r.x - 1, r.z - 1, mo, n);
+            /*---------------------------------*
+            | Computes the recursive part      |
+            *---------------------------------*/
+            f_initial(mii, m, n) = h(mii, m % delay_factor, m / delay_factor, n);
+
+            // First intra-tile
+            r = {0, order,
+                0, delay_factor,
+                // second arg is extent not upper bound
+                1, tile_width / delay_factor - 1,
+                "r"};
+            fi(mii, mi, mo, n) = f_initial(mii, mo * (tile_width / delay_factor) + mi, n);
+            fi(r.y, r.z, mo, n) += B(r.y, r.x) * fi(delay_factor - r.x - 1, r.z - 1, mo, n);
+
+            // Inter-tile
+            r_tail = {
+                0, order,
+                0, delay_factor,
+                1, imgCol / tile_width - 1,
+                "rt"
+            };
+            fct(mii, mo, n) = fi(mii, tile_width / delay_factor - 1, mo, n);
+            fct(r_tail.y, r_tail.z, n) += a1(r_tail.x, tile_width - delay_factor + r_tail.y + 1) * fct(delay_factor - r_tail.x - 1, r_tail.z - 1, n);
+
+            // Final intra-tile
+            in_tile = {
+                0, order,
+                "in_tile"
+            };
+            f(mii, mi, mo, n) = f_initial(mii, mo * (tile_width / delay_factor) + mi, n);
+            f(mii, 0, mo, n) += select(mo > 0, a1(in_tile.x, mii + 1) * fct(delay_factor - in_tile.x - 1, mo - 1, n), 0);
+            f(r.y, r.z, mo, n) += B(r.y, r.x) * f(delay_factor - r.x - 1, r.z - 1, mo, n);   
+        }
         
-        // f_delay(mii, m, n) = h(mii, m % delay_factor, m / delay_factor, n);
-        //
-        // r = {0, order,
-        //      0, delay_factor,
-        //      // second arg is extent not upper bound
-        //      1, imgCol / delay_factor - 1,
-        //      "r"};
-        // f_delay(r.y, r.z, n) +=
-        //     B(r.y, r.x) * f_delay(delay_factor - r.x - 1, r.z - 1, n);
-
-        // f = f_delay;
-        // // Because in the update definition, r.y is a reduction variable,
-        // // it is more difficult to do the reshaping as another step and
-        // // compute f_delay at f, because the reduction domain won't be constrained
-        // // to the range it is computed at.
-        // // f(m, n) = f_delay(m % delay_factor, m / delay_factor, n);
     }
 
     void schedule() {
         bool debug = false;
-        /*---------------------------------*
-        | Bounds                           |
-        *---------------------------------*/
-        A.bound(m, 0, delay_factor).bound(n, 0, delay_factor);
-        B.bound(m, 0, order).bound(n, 0, delay_factor);
-        f_initial.bound(mii, 0, delay_factor).bound(m, 0, imgCol / delay_factor)
-            .bound(n, 0, 2);  // stereo audio;
-        f.bound(n, 0, 2);
-        f.bound(mo, 0, imgCol / tile_width / delay_factor);
-        f.bound(mi, 0, tile_width);
-        f.bound(mii, 0, delay_factor);
-
-        /*---------------------------------*
-        |a1, A, B are small coeff matrices |
-        *---------------------------------*/
-        a1.compute_root().unroll(m);
-        A.compute_root();
-        B.compute_root();
-
         if (gpu_schedule == Schedule::CUDA) {
-            h
-                .compute_inline()
-                .update()
-                .unroll(w);
-            f_delay
+            a1.bound(m, 0, order).bound(n, 0, tile_width + 1);
+            f.bound(n, 0, 2);
+            f.bound(mo, 0, imgCol / tile_width);
+            f.bound(mi, 0, tile_width);
+
+            a1.compute_root().unroll(m);
+            fi
                 .compute_root()
-                .split(m, mo, mi, 16)
-                .split(mo, moo, moi, 16)
-                .reorder(mii, mi, moi, moo, n)
+                .split(mo, moo, moi, 32)
                 .gpu_blocks(moo, n)
-                .gpu_threads(mii, mi)
-                .unroll(moi);
-            f_delay
+                .gpu_threads(moi);
+            fi
+                .update()
+                .split(mo, moo, moi, 32)
+                .gpu_blocks(moo, n)
+                .gpu_threads(moi)
+                ;
+
+            fct
+                .compute_root()
+                .split(mo, moo, moi, 32)
+                .gpu_blocks(moo, n)
+                .gpu_threads(moi);
+            fct
                 .update()
                 .atomic(true)
-                .reorder(r.y, r.z, n)
                 .gpu_blocks(n)
-                .gpu_threads(r.y)
-                .unroll(r.x);
+                .gpu_threads(r_tail.y)
+                .unroll(r_tail.x);
+
+            // can be optimized
+            f
+                .compute_root()
+                .split(mo, moo, moi, 32)
+                .gpu_blocks(moo, n)
+                .gpu_threads(moi)
+                ;
+            if (!debug) f.unroll(mi, 8);
+            f
+                .update(0)
+                .atomic(true)
+                .split(mo, moo, moi, 32)
+                .gpu_blocks(moo, n)
+                .gpu_threads(moi)
+                .unroll(in_tile.x)
+                .unroll(in_tile.y)
+                ;
+            f
+                .update(1)
+                .atomic(true)
+                .split(mo, moo, moi, 32)
+                .gpu_blocks(moo, n)
+                .gpu_threads(moi)
+                // .unroll(r2.y, 8)
+                ;
         } else {
-            // if (!debug) {
-            //     h.compute_at(f_initial, moi);
-            // } else {
-            //     h.compute_at(f_initial, moi);
-            // }
+            /*---------------------------------*
+            | Bounds                           |
+            *---------------------------------*/
+            A.bound(m, 0, delay_factor).bound(n, 0, delay_factor);
+            B.bound(m, 0, order).bound(n, 0, delay_factor);
+            f_initial.bound(mii, 0, delay_factor).bound(m, 0, imgCol / delay_factor)
+                .bound(n, 0, 2);  // stereo audio;
+            f.bound(n, 0, 2);
+            f.bound(mo, 0, imgCol / tile_width);
+            f.bound(mi, 0, tile_width / delay_factor);
+            f.bound(mii, 0, delay_factor);
+
+            /*---------------------------------*
+            |a1, A, B are small coeff matrices |
+            *---------------------------------*/
+            a1.compute_root().unroll(m);
+            A.compute_root();
+            B.compute_root();
+
             h
                 .compute_at(f_initial, moi)
                 .store_in(MemoryType::WMMAAccumulator)
@@ -253,6 +322,7 @@ private:
     RDom wA, wB;
     RDom w{0, delay_factor, "w"};
     RDom r;
+    RDom r0, r2;
     RDom r_tail;
     RDom in_tile;
 };

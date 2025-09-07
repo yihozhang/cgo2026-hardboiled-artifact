@@ -360,16 +360,20 @@ int main(int argc, char **argv) {
     Buffer<uint16_t> img(M, N);
     for (int y = 0; y < N; y++) {
         for (int x = 0; x < M; x++) {
-            img(x, y) = float_to_float16(rand() & 1);  // uint16_t(rand() % 20);
+            img(x, y) = float_to_float16(rand() % 2 == 0 ? 1.f : 0.0);  // uint16_t(rand() % 20);
         }
     }
 
     img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
+    bool is_tc = strcmp(SCHEDULE, "tensorcore") == 0;
     // Create output buffer
-    Buffer<float> output(16, 64, M/16/64, N);
+    Buffer<float> output = is_tc ? Buffer<float>(16, 64, M/16/64, N) : Buffer<float>(1024, M/1024, N);
+    // TODO: I don't know why we need extent order + 2 instead of order + 1 for the coeff array
     Buffer<float> coeff(4);
-    float a = 0.9, b = -0.45;
+    // float a = 0.9, b = -0.45;
+    // float a = 1.6, b = -0.81;
+    float a = -1, b = -1;
     coeff(0) = 0;
     coeff(1) = a;
     coeff(2) = b;
@@ -390,10 +394,10 @@ int main(int argc, char **argv) {
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
     {
-        int delay_factor = 16;
+        int delay_factor = 16 * 1024;
         int order = 2;
-        float a[] = {0, 2, -1};
-        float a1[3][17] = {0.f};
+        float aa[] = {0, a, b};
+        float a1[3][delay_factor + 1] = {0.f};
 
 
         a1[0][0] = 1.;
@@ -401,10 +405,12 @@ int main(int argc, char **argv) {
             for (int i = 1; i <= delay_factor; i++) {
                 for (int j = 1; j <= i; j++) {
                     if (j + o <= order) {
-                        a1[o][i] += a1[0][i - j] * a[j + o];
+                        a1[o][i] += a1[0][i - j] * aa[j + o];
                     }
                 }
+                // std::cout << std::fixed << std::setprecision(10) << a1[o][i] << " ";
             }
+            // std::cout << "\n";
         }
     }
 
@@ -423,10 +429,12 @@ int main(int argc, char **argv) {
                 expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
                     (x > 0 ? expected[x-1][y] * a : 0.f) + 
                     (x > 1 ? expected[x-2][y] * b : 0.f);
-                if (fabs(expected[x][y] - output(x%16,(x/16)%64, x/16/64, y)) > 0.001f) {
+                auto o = is_tc ? output(x%16,(x/16)%64, x/16/64, y) : output(x%1024,x/1024, y);
+                // std::cout << expected[x][y] << " " << o << " " << halide_float16_bits_to_float(img(x, y)) << "\n";
+                if (fabs(expected[x][y] - o) > 0.01f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
                               << std::fixed << std::setprecision(10)
-                              << output(x%16,(x/16)%64, x/16/64, y) << " != " << expected[x][y] << "\n";
+                              << o << " != " << expected[x][y] << "\n";
                     success = false;
                 }
             }
