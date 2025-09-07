@@ -86,10 +86,10 @@ public:
         }
 
         Func DCT("DCT");
-        DCT(x, y) = cast<float>(DCT_mat(x, y));
+        DCT(x, y) = DCT_mat(x, y);
 
         Func IDCT("IDCT");
-        IDCT(x, y) = cast<float>(IDCT_mat(x, y));
+        IDCT(x, y) = IDCT_mat(x, y);
 
         // Perform the DCT along the rows
         RDom r(0, 16);
@@ -99,20 +99,20 @@ public:
 
         // Perform the DCT along the cols
         Func dct_cols("dct_cols");
-        dct_cols(xi, yi, x, y, c) += DCT(r, yi) * cast<float16_t>(dct_rows(xi, r, x, y, c));
+        dct_cols(xi, yi, x, y, c) += DCT(r, yi) * dct_rows(xi, r, x, y, c);
 
         // Push small coefficients to zero
         Func thresholded("thresholded");
         Expr e = dct_cols(xi, yi, x, y, c);
         Expr t = strength * noise_floor(xi) * noise_floor(yi);
-        thresholded(xi, yi, x, y, c) = select(abs(e) < t, 0.f, e);
+        thresholded(xi, yi, x, y, c) = select(abs(e) < t, cast<float16_t>(0.f), e);
 
         // Take an inverse DCT of each tile.
         Func idct_rows("idct_rows");
-        idct_rows(xi, yi, x, y, c) += IDCT(r, xi) * cast<float16_t>(thresholded(r, yi, x, y, c));
+        idct_rows(xi, yi, x, y, c) += IDCT(r, xi) * thresholded(r, yi, x, y, c);
 
         Func idct_cols("idct_cols");
-        idct_cols(xi, yi, x, y, c) += IDCT(r, yi) * cast<float16_t>(idct_rows(xi, r, x, y, c));
+        idct_cols(xi, yi, x, y, c) += IDCT(r, yi) * idct_rows(xi, r, x, y, c);
 
         // Add together overlapping estimates
         Func averaged("averaged");
@@ -131,21 +131,33 @@ public:
         }
         */
 
+        // Make it so that we can unroll across c
         output.dim(2).set_bounds(0, 3);
+        // Make the IR easier to read
+        output.dim(0).set_min(0);
+        output.dim(1).set_min(0);
+        input.dim(0).set_min(0);
+        input.dim(1).set_min(0);
+        input.dim(2).set_bounds(0, 3);
 
         // The schedule. We should be able to fuse this whole thing into two
         // kernel launches - one to compute the per-tile work, and a final one
-        // to do the overlap-and-add.
+        // to do the overlap-and-add. We'll schedule the overlap-and-add the
+        // same way for both schedules:
+        output.compute_root()
+            .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
+            .gpu_blocks(x, y, c)
+            .gpu_threads(xi, yi);
+
+        Var xii{"xii"}, yii{"yii"}, z{"z"}, xo{"xo"}, yo{"yo"};
+
         switch (gpu_schedule) {
-        case Schedule::CUDA:
-        case Schedule::TensorCore:  // TODO: Move this
+        case Schedule::CUDA: {
             // For each transform, we want each thread handling a small tile of
             // outputs. To amortize the loads of the transform matrices we'll
             // unroll in c and a little in x and y. To amortize the loads of the
             // image tile we'll unroll in either xi or yi, depending on which
             // direction we're transforming in.
-
-            Var xii{"xii"}, yii{"yii"}, z{"z"};
 
             auto schedule_transform = [&](Func w, Func t, int tx, int ty) {
                 w
@@ -173,7 +185,6 @@ public:
                     .unroll(y);
             };
 
-            Var xo{"xo"}, yo{"yo"};
             idct_cols
                 .in()
                 .compute_root()
@@ -190,12 +201,69 @@ public:
             schedule_transform(thresholded, dct_cols, 1, 8);
             schedule_transform(dct_rows.in(), dct_rows, 8, 1);
 
-            output.compute_root()
-                .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
-                .gpu_blocks(x, y, c)
-                .gpu_threads(xi, yi);
-
             break;
+        }
+        case Schedule::TensorCore: {
+            LoopLevel blocks;
+
+            auto schedule_transform = [&](Func t) {
+                t.in()
+                    .compute_at(blocks)
+                    .unroll(c)
+                    .unroll(x)
+                    .unroll(y)
+                    .vectorize(xi)
+                    .vectorize(yi);
+                t.compute_at(blocks)
+                    .store_in(MemoryType::WMMAAccumulator)
+                    .unroll(c)
+                    .unroll(x)
+                    .unroll(y)
+                    .vectorize(xi)
+                    .vectorize(yi)
+                    .update()
+                    .reorder(r, xi, yi, c, x, y)
+                    .unroll(c)
+                    .unroll(x)
+                    .unroll(y)
+                    .vectorize(xi)
+                    .vectorize(yi)
+                    .atomic()
+                    .vectorize(r);
+            };
+
+            idct_cols
+                .in()
+                .compute_root()
+                .tile(x, y, xo, yo, x, y, 2, 1)
+                .reorder(xi, yi, x, y, c, xo, yo)
+                .gpu_blocks(xo, yo);
+
+            blocks.set({idct_cols.in(), xo});
+
+            // For the row transforms, we want the transform matrix transposed
+            // (TODO: check this is really necessary)
+            DCT.in(dct_rows).compute_root().reorder_storage(y, x);
+            IDCT.in(idct_rows).compute_root().reorder_storage(y, x);
+
+            schedule_transform(idct_rows);
+            schedule_transform(idct_cols);
+            schedule_transform(dct_cols);
+            schedule_transform(dct_rows);
+
+            idct_cols.in().compute_root();
+
+            thresholded
+                .compute_at(blocks)
+                .split(yi, yi, yii, 2)
+                .reorder(c, y, x, yi, yii, xi)
+                .fuse(xi, yii, z)
+                .gpu_lanes(z)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .unroll(yi);
+        }
         }
     }
 };
