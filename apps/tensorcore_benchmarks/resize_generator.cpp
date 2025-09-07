@@ -198,16 +198,11 @@ public:
         kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
         kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
 
-        resized_y(x, y, c) = 0.f;
-        resized_y(x, y, c) += cast<float>(kernel_y(y, r)) * cast<float>(as_float(x, r + beginy, c));
+        resized_y(x, y, c) += kernel_y(y, r) * as_float(x, r + beginy, c);
 
-        Func resized_y_f16{"resized_y_f16"};
-        resized_y_f16(x, y, c) = cast<float16_t>(resized_y(x, y, c));
+        resized_x(x, y, c) += kernel_x(x, r) * resized_y(r + beginx, y, c);
 
-        resized_x(x, y, c) = 0.f;
-        resized_x(x, y, c) += cast<float>(kernel_x(x, r)) * cast<float>(resized_y_f16(r + beginx, y, c));
-
-        output(x, y, c) = cast<float16_t>(clamp(resized_x(x, y, c), 0.f, 1.f));
+        output(x, y, c) = clamp(resized_x(x, y, c), cast<float16_t>(0.f), cast<float16_t>(1.f));
 
         // Schedule
 
@@ -247,7 +242,7 @@ public:
             // y, the load from the kernel doesn't depend on x and c, and the load from
             // the image doesn't depend on y % 16, so we can schedule it like a
             // matrix multiply (i.e. tile it).
-            resized_y_f16
+            resized_y.in()
                 .compute_root()
                 .align_bounds(x, 16)
                 .align_bounds(y, 16)
@@ -258,7 +253,7 @@ public:
                 .unroll(xii)
                 .unroll(yii);
             resized_y
-                .compute_at(resized_y_f16, xi)
+                .compute_at(resized_y.in(), xi)
                 .unroll(c)
                 .unroll(x)
                 .unroll(y)
@@ -291,7 +286,7 @@ public:
                 .unroll(c)
                 .unroll(x)
                 .unroll(y);
-            resized_y_f16.in().compute_at(resized_x, c).vectorize(y);
+            resized_y.in().in().compute_at(resized_x, c).vectorize(y);
             kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
             break;
         case Schedule::TensorCore:
@@ -358,7 +353,10 @@ public:
                 .vectorize(y)
                 .vectorize(ri);
 
-            resized_y_f16.compute_at(output, x)
+            // Need an extra layer of staging because we're not necessarily aligned in X
+            resized_y.in()
+                .in()
+                .compute_at(output, x)
                 .store_in(MemoryType::GPUShared)
                 .split(x, xo, xi, 32, TailStrategy::RoundUp)
                 .gpu_lanes(xi);
