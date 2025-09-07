@@ -688,7 +688,7 @@ define weak_odr i32 @adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16.p3i
   %v2f = bitcast float %v2 to <2 x half>
   %v3f = bitcast float %v3 to <2 x half>
 
-  %start = getelementptr i32, i32 addrspace(3)* %ptr, i32 %offset  
+  %start = getelementptr i16, i16 addrspace(3)* %ptr, i32 %offset  
   call void @llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16.p3i32(i8 addrspace(3)* %start, <2 x half> %v0f, <2 x half> %v1f, <2 x half> %v2f, <2 x half> %v3f, i32 %stride)
   ret i32 0
 }
@@ -718,7 +718,7 @@ define weak_odr i32 @adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16(i8*
   %v2f = bitcast float %v2 to <2 x half>
   %v3f = bitcast float %v3 to <2 x half>
 
-  %start = getelementptr i32, i32* %ptr, i32 %offset  
+  %start = getelementptr i16, i16* %ptr, i32 %offset  
   call void @llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16(i8* %start, <2 x half> %v0f, <2 x half> %v1f, <2 x half> %v2f, <2 x half> %v3f, i32 %stride)
   ret i32 0
 }
