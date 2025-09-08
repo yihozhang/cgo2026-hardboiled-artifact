@@ -923,6 +923,7 @@ public:
                         map<string, pair<int, int>> intrinsics_with_handle_args = {
                             {"wmma.load.a.sync.aligned.row.m16n16k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m16n16k16.f16", {0, 1}},
+                            {"wmma.load.b.sync.aligned.col.m16n16k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m16n16k16.f32", {0, 1}},
                             {"wmma.store.d.sync.aligned.row.m16n16k16.f32", {0, 2}},
                             {"wmma.store.d.sync.aligned.row.m16n16k16.f16", {0, 2}},
