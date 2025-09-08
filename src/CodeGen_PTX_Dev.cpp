@@ -263,6 +263,7 @@ void CodeGen_PTX_Dev::init_module() {
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.row.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
         {"wmma.mma.sync.aligned.row.col.m16n16k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.col.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.row.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
+        {"wmma.mma.sync.aligned.row.col.m16n16k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.col.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
 
         {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
