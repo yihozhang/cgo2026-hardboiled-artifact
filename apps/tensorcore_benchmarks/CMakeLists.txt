@@ -21,7 +21,7 @@ set(NN_TENSOR_C 16 CACHE STRING "Channels (C) for NN layers")
 
 # Attention parameters
 set(ATT_D 128 CACHE STRING "Feature dimension (D) for attention")
-set(ATT_L 64 CACHE STRING "Sequence length (L) for attention")
+set(ATT_L 2048 CACHE STRING "Sequence length (L) for attention")
 set(ATT_N 8 CACHE STRING "Batch size (N) for attention")
 
 # Matmul parameters

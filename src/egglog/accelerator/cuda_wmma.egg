@@ -57,6 +57,14 @@
 
 (rule (
         (= e (Load (Float bits _lanes) (V tile-name) load-index))
+        (WMMAAllocation tile-name n-lanes m-lanes)
+        (= load-index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
+    ) (
+        (WMMAShape e n-lanes m-lanes)
+    ))
+
+(rule (
+        (= e (Load (Float bits _lanes) (V tile-name) load-index))
         
         (WMMAAllocation tile-name n-lanes m-lanes)
         
@@ -77,18 +85,28 @@
 
 ;; Allow performing uniform element-wise operations directly on WMMA tiles
 
+(relation UniformBinOps (BinOp))
+(rule () (
+    (UniformBinOps (Min))
+    (UniformBinOps (Max))
+    (UniformBinOps (Add))
+    (UniformBinOps (Sub))
+    (UniformBinOps (Mul))
+    (UniformBinOps (Div))
+    (UniformBinOps (Mod))
+))
+
 (rule (
-        (= e (Bop (Max) e1 (WMMA2Mem e2)))
-        (= e1 (Broadcast _val lanes))
-        (WMMAShape e2 rows cols)
+        (= e (Bop uniform-op (WMMA2Mem e1) e2))
+        (= e2 (Broadcast _val lanes))
+        (WMMAShape e1 rows cols)
         (= lanes (* rows cols))
+        (UniformBinOps uniform-op)
     ) (
-        (let e_new (Bop (Max) e1 e2))
+        (let e_new (Bop uniform-op e1 e2))
         (WMMAShape e_new rows cols)
         (union e (WMMA2Mem e_new))
     ))
-
-;; todo: handle other binops, handle mat-mat ops
 
 (relation wmma-f16-rhs (
     Expr ;; orig-expr
@@ -219,7 +237,7 @@
 
 (rule (
         (= e (Mem2WMMA hal-expr))
-        (= hal-expr (Load (Float bits lanes) (V "bias") addr))
+        (= hal-expr (Load (Float bits lanes) (V buf) addr))
     
         (WMMAShape e rows cols)
 

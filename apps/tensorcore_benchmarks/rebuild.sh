@@ -12,9 +12,9 @@ CONV_IMG_ROW="2160"
 NN_TENSOR_N="128"
 NN_TENSOR_H="64"
 NN_TENSOR_W="64"
-NN_TENSOR_C="16"
+NN_TENSOR_C="32"
 ATT_D="128"
-ATT_L="64"
+ATT_L="2048"
 ATT_N="8"
 MATMUL_M="4096"
 MATMUL_N="4096"
@@ -33,12 +33,9 @@ show_help() {
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
     echo "  -conv_col,  --img-cols IMG_COL          Image width (3840) [default: 3840]"
     echo "  -conv_row,  --img-rows IMG_ROW          Image height (2160) [default: 2160]"
-    echo "  -nhwc,      --nhwc N,H,W,C              Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128,64,64,16]"
-    echo "  -att,       --att D L N                 Attention dims D, L, N [default: 128 64 8]"
-    echo "  -mm_m,      --matmul-m MATMUL_M         Rows of the input matrix A [default: 4096]"
-    echo "  -mm_n,      --matmul-n MATMUL_N         Columns of the input matrix B [default: 4096]"
-    echo "  -mm_k,      --matmul-k MATMUL_K         Columns of the input matrix A / Rows of the input matrix B [default: 4096]"
-    echo "  -mm_mnk,    --matmul-dims DIM_SIZE      M,N,K Dimensions of the input matrix A and B [default: 4096]"
+    echo "  -nhwc,      --nhwc N H W C              Batch size N, tensor height H, tensor width W, and tensor channels C [default: 128 64 64 32]"
+    echo "  -att,       --att D L N                 Attention dims D, L, N [default: 128 2048 8]"
+    echo "  -mm_mnk,    --matmul-dims M N K         M, N, K Dimensions of the input matrix A and B [default: 4096 4096 4096]"
     echo "  -h, --help                              Show this help message"
     echo ""
     echo "Examples:"
@@ -90,23 +87,11 @@ while [[ $# -gt 0 ]]; do
             ATT_N="$4"
             shift 4
             ;;
-        -mm_m|--matmul-m)
-            MATMUL_M="$2"
-            shift 2
-            ;;
-        -mm_n|--matmul-n)
-            MATMUL_N="$2"
-            shift 2
-            ;;
-        -mm_k|--matmul-k)
-            MATMUL_K="$2"
-            shift 2
-            ;;
         -mm_mnk|--matmul-dims)
             MATMUL_M="$2"
-            MATMUL_N="$2"
-            MATMUL_K="$2"
-            shift 2
+            MATMUL_N="$3"
+            MATMUL_K="$4"
+            shift 4
             ;;
         -h|--help)
             show_help
