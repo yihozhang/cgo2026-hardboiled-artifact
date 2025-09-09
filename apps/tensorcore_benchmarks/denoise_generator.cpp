@@ -313,12 +313,18 @@ public:
 
         // Make it so that we can unroll across c
         output.dim(2).set_bounds(0, 3);
-        // Make the IR easier to read
+        // Make the final stores vectorizable
+        output.dim(2).set_stride(output.dim(2).stride() / 4 * 4);
+        output.dim(1).set_stride(output.dim(1).stride() / 4 * 4);
+        output.set_host_alignment(64);
         output.dim(0).set_min(0);
         output.dim(1).set_min(0);
+        // Make the IR easier to read
         input.dim(0).set_min(0);
         input.dim(1).set_min(0);
         input.dim(2).set_bounds(0, 3);
+
+        Var xii{"xii"}, yii{"yii"}, z{"z"}, xo{"xo"}, yo{"yo"};
 
         // The schedule. We should be able to fuse this whole thing into two
         // kernel launches - one to compute the per-tile work, and a final one
@@ -326,10 +332,12 @@ public:
         // same way for both schedules:
         output.compute_root()
             .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
-            .gpu_blocks(x, y, c)
-            .gpu_threads(xi, yi);
-
-        Var xii{"xii"}, yii{"yii"}, z{"z"}, xo{"xo"}, yo{"yo"};
+            .reorder(c, xi, yi, x, y)
+            .gpu_blocks(x, y)
+            .vectorize(xi, 8)
+            .unroll(c)
+            .fuse(xi, yi, z)
+            .gpu_threads(z);
 
         switch (gpu_schedule) {
         case Schedule::CUDA: {
