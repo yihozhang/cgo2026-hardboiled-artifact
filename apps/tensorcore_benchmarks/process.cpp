@@ -409,8 +409,137 @@ int main(int argc, char **argv) {
                 }
             }
         }
-    }
 
+        if (success) {
+            std::cout << "Outputs match!\n";
+            return 0;
+        } else {
+            std::cout << "Outputs do not match...\n";
+            return 1;
+        }
+    }
+#elif defined(RUN_resize)
+    // Create test data using compile-time definitions
+    const int M = IMG_COL;
+    const int N = IMG_ROW;
+    const int C = 3;
+
+    const std::vector<float> scales = {0.07, 0.12, 0.25, 0.75, 0.9, 0.99};  //, 1.01, 1.1, 1.5, 2., 2.5, 4};
+    std::string benchmark_name = BENCHMARK_NAME;
+
+    std::cout << "Running " << benchmark_name << " with:" << std::endl;
+    std::cout << "  Image size: " << N << "x" << M << std::endl;
+    std::cout << "  Schedule: " << SCHEDULE << std::endl;
+
+    for (const float scale : scales) {
+        std::cout << "  scale: " << scale << std::endl;
+
+        const int OM = M * scale;
+        const int ON = N * scale;
+
+        // Make a pinwheel so that the quality of the resample is apparent
+        Buffer<uint16_t, 3> img(M, N, C);
+        int R = std::min(M, N) / 2 - 10;
+        FOR(c, C) {
+            FOR(y, N) {
+                double dy = y - N / 2 + 0.5 / scale;
+                FOR(x, M) {
+                    double dx = x - M / 2 + 0.5 / scale;
+                    if (dx * dx + dy * dy > R * R) {
+                        img(x, y, c) = float_to_float16(0.5f);
+                    } else {
+                        double theta = atan2(dy, dx);
+                        bool white = ((int)((theta / M_PI + 1) * 300 + 0.5)) & 1;
+                        img(x, y, c) = white ? float_to_float16(1.0f) : float_to_float16(0.f);
+                    }
+                }
+            }
+        }
+
+        // smallest multiple of 32 that is greater than OM and ON.
+        const int OM_realized = (OM + 31) & ~31;
+        const int ON_realized = (ON + 31) & ~31;
+        Buffer<uint16_t, 3> output(OM_realized, ON_realized, C);
+
+        img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+        output.raw_buffer()->type = halide_type_t(halide_type_float, 16);
+
+        auto resize = scale > 1.0f ? resize_up : resize_down;
+
+        auto time = benchmark(5, 5, [&]() {
+            resize(img.raw_buffer(), scale, output.raw_buffer());
+            output.device_sync();
+        });
+
+        if (output.has_device_allocation()) {
+            output.copy_to_host();
+        }
+        output.device_sync();
+
+        Buffer<uint8_t, 3> output_8(OM, ON, C);
+        FOR(c, C) {
+            FOR(y, ON) {
+                FOR(x, OM) {
+                    float f = float16_to_float(output(x, y, c));
+                    output_8(x, y, c) = (uint8_t)(f * 255.999f);
+                }
+            }
+        }
+        Halide::Tools::save_image(output_8, "pinwheel_" + std::to_string(scale) + ".png");
+
+        std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
+
+        if (VERIFY_OUTPUT) {
+            uint16_t *expected = new uint16_t[OM * ON * C];
+            resize_sim((uint16_t *)img.raw_buffer()->host, expected, M, N, C, scale);
+
+            // FOR (y, 16) {
+            //     FOR (x, 16) {
+            //         std::cout << std::fixed << std::setprecision(4) << img(x, y, 0) << " ";
+            //     }
+            //     std::cout << "\n";
+            // }
+            // std::cout << "\n";
+            // FOR (y, 16) {
+            //     FOR (x, 16) {
+            //         std::cout << std::fixed << std::setprecision(4) << output(x, y, 0) << " ";
+            //     }
+            //     std::cout << "\n";
+            // }
+            // std::cout << "\n";
+            // FOR (y, 16) {
+            //     FOR (x, 16) {
+            //         std::cout << std::fixed << std::setprecision(4) << expected[y * OM + x] << " ";
+            //     }
+            //     std::cout << "\n";
+            // }
+            bool success = true;
+            FOR(c, C) {
+                if (!success) break;
+                FOR(y, ON) {
+                    if (!success) break;
+                    FOR(x, OM) {
+                        float exp = float16_to_float(expected[c * OM * ON + y * OM + x]);
+                        float out = float16_to_float(output(x, y, c));
+                        if (fabs(exp - out) > 0.01f) {
+                            std::cerr << "Error at (" << x << ", " << y << ", " << c << "): "
+                                      << std::fixed << std::setprecision(10)
+                                      << out << " != " << exp << "\n";
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (success) {
+                std::cout << "Outputs match!\n";
+            } else {
+                std::cout << "Outputs do not match...\n";
+                return 1;
+            }
+        }
+    }
 #elif defined(RUN_conv_layer)
     // Create test data using compile-time definitions
     const int N = NN_TENSOR_N;
