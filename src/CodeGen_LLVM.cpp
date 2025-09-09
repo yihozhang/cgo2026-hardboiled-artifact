@@ -4781,7 +4781,13 @@ Value *CodeGen_LLVM::call_intrin(const llvm::Type *result_type, int intrin_lanes
 
                 // There can be some mismatches in types, such as when passing
                 // scalar Halide type T to LLVM vector type <1 x T>.
-                arg_values[i] = builder->CreateBitCast(arg_values[i], formal_param_type);
+                auto param_pointer_t = dyn_cast<llvm::PointerType>(formal_param_type);
+                auto arg_pointer_t = dyn_cast<llvm::PointerType>(arg_values[i]->getType());
+                if (param_pointer_t && arg_pointer_t) {
+                    arg_values[i] = builder->CreateAddrSpaceCast(arg_values[i], formal_param_type);
+                } else {
+                    arg_values[i] = builder->CreateBitCast(arg_values[i], formal_param_type);
+                }
             }
         }
     }

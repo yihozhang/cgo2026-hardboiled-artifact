@@ -246,13 +246,13 @@ void CodeGen_PTX_Dev::init_module() {
         {"round", Float(32), "llvm.rint.f32", {Float(32)}},
         {"round", Float(64), "llvm.rint.f64", {Float(64)}},
 
-        {"wmma.load.a.sync.aligned.row.m16n16k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.b.sync.aligned.col.m16n16k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.col.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.c.sync.aligned.row.m16n16k16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m16n16k16.f32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m16n16k16.f16", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
+        {"wmma.load.a.sync.aligned.row.m16n16k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m16n16k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.col.m16n16k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.col.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f32.p1i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f32.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m16n16k16.f16.p1i32", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.load.c.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f32.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f32.p1i32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m16n16k16.f16.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m16n16k16.store.d.row.stride.f16.p1i32", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
         {"wmma.load.a.sync.aligned.row.m16n16k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.row.m16n16k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.col.m16n16k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m16n16k16.load.b.col.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
@@ -265,11 +265,11 @@ void CodeGen_PTX_Dev::init_module() {
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.row.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
         {"wmma.mma.sync.aligned.row.col.m16n16k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m16n16k16.mma.row.col.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
 
-        {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m32n8k16.f32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m32n8k16.f16", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f16", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
+        {"wmma.load.a.sync.aligned.row.m32n8k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m32n8k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m32n8k16.f32.p1i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m32n8k16.f32.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f32.p1i32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m32n8k16.f16.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m32n8k16.store.d.row.stride.f16.p1i32", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
         {"wmma.load.a.sync.aligned.row.m32n8k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.a.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.row.m32n8k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.b.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32.p3i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.load.c.row.stride.f32.p3i32", {Handle(), Int(32), Int(32)}, true},
@@ -278,11 +278,11 @@ void CodeGen_PTX_Dev::init_module() {
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m32n8k16.mma.row.row.f32.f32", {Int(32, 8), Int(32, 8), Float(32, 8)}, true},
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f16.f16", Float(32, 4), "adapted.llvm.nvvm.wmma.m32n8k16.mma.row.row.f16.f16", {Int(32, 8), Int(32, 8), Float(32, 4)}, true},
 
-        {"wmma.load.a.sync.aligned.row.m8n32k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.a.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.b.sync.aligned.row.m8n32k16.f16", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.b.row.stride.f16", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.load.c.sync.aligned.row.m8n32k16.f32", Float(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.c.row.stride.f32", {Handle(), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m8n32k16.f32", Int(32), "adapted.llvm.nvvm.wmma.m8n32k16.store.d.row.stride.f32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
-        {"wmma.store.d.sync.aligned.row.m8n32k16.f16", Int(32), "adapted.llvm.nvvm.wmma.m8n32k16.store.d.row.stride.f16", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
+        {"wmma.load.a.sync.aligned.row.m8n32k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.a.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.b.sync.aligned.row.m8n32k16.f16.p1i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.b.row.stride.f16.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.load.c.sync.aligned.row.m8n32k16.f32.p1i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.c.row.stride.f32.p1i32", {Handle(), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m8n32k16.f32.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m8n32k16.store.d.row.stride.f32.p1i32", {Handle(), Float(32, 8), Int(32), Int(32)}, true},
+        {"wmma.store.d.sync.aligned.row.m8n32k16.f16.p1i32", Int(32), "adapted.llvm.nvvm.wmma.m8n32k16.store.d.row.stride.f16.p1i32", {Handle(), Float(32, 4), Int(32), Int(32)}, true},
         {"wmma.load.a.sync.aligned.row.m8n32k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.a.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.b.sync.aligned.row.m8n32k16.f16.p3i32", Int(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.b.row.stride.f16.p3i32", {Handle(), Int(32), Int(32)}, true},
         {"wmma.load.c.sync.aligned.row.m8n32k16.f32.p3i32", Float(32, 8), "adapted.llvm.nvvm.wmma.m8n32k16.load.c.row.stride.f32.p3i32", {Handle(), Int(32), Int(32)}, true},
@@ -324,7 +324,7 @@ void CodeGen_PTX_Dev::visit(const Call *op) {
         string suffix;
         auto it = memory_type_of.find(op->args[0].as<Variable>()->name);
         if (it == memory_type_of.end()) {
-            suffix = "";
+            suffix = ".p1i32";  // global
         } else if (it->second == MemoryType::GPUShared) {
             suffix = ".p3i32";
         } else {
@@ -826,7 +826,7 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     vector<char> buffer(outstr.begin(), outstr.end());
 
     // Dump the SASS too if the cuda SDK is in the path
-    if (debug::debug_level() >= 2) {
+    if (debug::debug_level() >= 1) {
         debug(2) << "Compiling PTX to SASS. Will fail if CUDA SDK is not installed (and in the path).\n";
 
         TemporaryFile ptx(get_current_kernel_name(), ".ptx");
