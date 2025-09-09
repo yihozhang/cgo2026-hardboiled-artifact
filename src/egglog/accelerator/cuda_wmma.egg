@@ -246,9 +246,10 @@
 
 (rule (
         (= s (Store store-name (WMMA2Mem tile) index))
+        (= tile (Load (Float bits _lanes) (V tile-name) load-index))
         (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
         (has-type tile (Float bits _lanes))
-
+        (WMMAAllocation tile-name n-lanes m-lanes)
         (WMMATileD (Tile n-lanes m-lanes _k) (RowMajor) intrinsic bits)
     ) (
         (let new-s (Evaluate
