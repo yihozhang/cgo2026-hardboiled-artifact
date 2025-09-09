@@ -9,6 +9,7 @@ tests(GROUPS instrsel-benchmarks
         matmul_vnni_1x1.cpp
         matmul_vnni_2x2.cpp
         convolution.cpp
+        rec_filter.cpp
 )
 
 # Disable PCH for this target

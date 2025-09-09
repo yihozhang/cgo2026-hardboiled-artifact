@@ -72,7 +72,7 @@
               x-lanes)
     )
 ) (
-    (let new-lhs (Call "tile_load" (UIntOrInt lhs-signed 8 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 r-lanes) (Var (Handle 1) lhs-name) lhs-base x-stride)))
+    (let new-lhs (Call "tile_load" (UIntOrInt lhs-signed 8 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 r-lanes) (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
     (amx-int/uint-lhs orig-lhs x-lanes y-lanes r-lanes new-lhs)
 ) :ruleset amx)
 
@@ -84,7 +84,7 @@
               x-lanes)
     )
 ) (
-    (let new-lhs (Call "tile_load" (BFloat 16 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 r-lanes) (Var (Handle 1) lhs-name) lhs-base x-stride)))
+    (let new-lhs (Call "tile_load" (BFloat 16 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 r-lanes) (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
     (amx-float-lhs orig-lhs x-lanes y-lanes r-lanes new-lhs)
 ) :ruleset amx)
 
@@ -122,7 +122,7 @@
         )
     )
 ) (
-    (let amx-rhs (Call "tile_load" (UIntOrInt rhs-signed 8 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 4)) (IntImm16 (* y-lanes 4)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride)))
+    (let amx-rhs (Call "tile_load" (UIntOrInt rhs-signed 8 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 4)) (IntImm16 (* y-lanes 4)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride) (Intrinsic)))
     (amx-int/uint-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
 
@@ -141,7 +141,7 @@
         )
     )
 ) (
-    (let amx-rhs (Call "tile_load" (BFloat 16 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 2)) (IntImm16 (* y-lanes 2)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride)))
+    (let amx-rhs (Call "tile_load" (BFloat 16 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 2)) (IntImm16 (* y-lanes 2)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride) (Intrinsic)))
     (amx-float-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
 
@@ -213,10 +213,12 @@
                 (Call "KWayInterleave" (BFloat 16 (* y-lanes r-lanes)) 
                     (vec-of (IntImm32 4) 
                             (Load rhs-type rhs-name (Ramp (Ramp rhs-base (IntImm32 1) y-lanes) (Broadcast rhs-r-stride y-lanes) r-lanes))
-                            (IntImm32 r-lanes)))))
+                            (IntImm32 r-lanes))
+                    (Intrinsic))))
             (IntImm32 0)
             (IntImm32 (* y-lanes 4))
-            )))
+            )
+        (Intrinsic)))
     (amx-int/uint-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
 
@@ -246,10 +248,12 @@
                 (Call "KWayInterleave" (BFloat 16 (* y-lanes r-lanes)) 
                     (vec-of (IntImm32 2) 
                             (Load rhs-type rhs-name (Ramp (Ramp rhs-base (IntImm32 1) y-lanes) (Broadcast rhs-r-stride y-lanes) r-lanes))
-                            (IntImm32 r-lanes)))))
+                            (IntImm32 r-lanes))
+                    (Intrinsic))))
             (IntImm32 0)
             (IntImm32 (* y-lanes 2))
-            )))
+            )
+        (Intrinsic)))
     (amx-float-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
 
@@ -269,7 +273,7 @@
     (amx-int/uint-lhs lhs x-lanes y-lanes r-lanes new-lhs)
     (amx-int/uint-rhs rhs x-lanes y-lanes r-lanes new-rhs)
 ) (
-    (let new-e (Call "tile_matmul" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) (Mem2AMX mat) new-lhs new-rhs)))
+    (let new-e (Call "tile_matmul" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) (Mem2AMX mat) new-lhs new-rhs) (Intrinsic)))
     (AMXShape new-e x-lanes (* y-lanes 4))
     (union e (AMX2Mem new-e))
 ) :ruleset amx)
@@ -287,8 +291,8 @@
     (amx-int/uint-lhs lhs x-lanes y-lanes r-lanes new-lhs)
     (amx-int/uint-rhs rhs x-lanes y-lanes r-lanes new-rhs)
 ) (
-    (let initial (Call "tile_zero" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)))))
-    (let new-e (Call "tile_matmul" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) initial new-lhs new-rhs)))
+    (let initial (Call "tile_zero" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4))) (Intrinsic)))
+    (let new-e (Call "tile_matmul" (Int 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) initial new-lhs new-rhs) (Intrinsic)))
     (AMXShape new-e x-lanes (* y-lanes 4))
     (union e (AMX2Mem new-e))
 ) :ruleset amx)
@@ -308,7 +312,7 @@
     (amx-float-lhs lhs x-lanes y-lanes r-lanes new-lhs)
     (amx-float-rhs rhs x-lanes y-lanes r-lanes new-rhs)
 ) (
-    (let new-e (Call "tile_matmul" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) (Mem2AMX mat) new-lhs new-rhs)))
+    (let new-e (Call "tile_matmul" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) (Mem2AMX mat) new-lhs new-rhs) (Intrinsic)))
     (AMXShape new-e x-lanes (* y-lanes 4))
     (union e (AMX2Mem new-e))
 ) :ruleset amx)
@@ -326,8 +330,8 @@
     (amx-float-lhs lhs x-lanes y-lanes r-lanes new-lhs)
     (amx-float-rhs rhs x-lanes y-lanes r-lanes new-rhs)
 ) (
-    (let initial (Call "tile_zero" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)))))
-    (let new-e (Call "tile_matmul" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) initial new-lhs new-rhs)))
+    (let initial (Call "tile_zero" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4))) (Intrinsic)))
+    (let new-e (Call "tile_matmul" (Float 32 (* x-lanes y-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* y-lanes 4)) (IntImm16 r-lanes) initial new-lhs new-rhs) (Intrinsic)))
     (AMXShape new-e x-lanes (* y-lanes 4))
 
     (union e (AMX2Mem new-e))
@@ -350,7 +354,7 @@
         )))
     (AMXShape e rows colbytes)
 ) (
-    (let new-e (Call "tile_zero" (Int 32 lanes) (vec-of (IntImm16 rows) (IntImm16 colbytes))))
+    (let new-e (Call "tile_zero" (Int 32 lanes) (vec-of (IntImm16 rows) (IntImm16 colbytes)) (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -362,7 +366,7 @@
         )))
     (AMXShape e rows colbytes)
 ) (
-    (let new-e (Call "tile_zero" (Float 32 lanes) (vec-of (IntImm16 rows) (IntImm16 colbytes))))
+    (let new-e (Call "tile_zero" (Float 32 lanes) (vec-of (IntImm16 rows) (IntImm16 colbytes)) (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -393,7 +397,8 @@
                            (IntImm32 0) ;; offset
                            ;; (Computed)
                            (IntImm32 colbytes) ;; stride
-                           )))
+                           )
+                    (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -412,7 +417,8 @@
                            (IntImm32 0) ;; offset
                            ;; (Computed)
                            (IntImm32 colbytes) ;; stride
-                           )))
+                           )
+                    (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -424,7 +430,7 @@
     (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
     (= ty (UIntOrInt _sign 8 _lanes))
 ) (
-    (let new-e (Call "tile_load" ty (vec-of (IntImm16 n-lanes) (IntImm16 m-lanes) (Var (Handle 1) name) base n-stride)))
+    (let new-e (Call "tile_load" ty (vec-of (IntImm16 n-lanes) (IntImm16 m-lanes) (Var (Handle 1) name) base n-stride) (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -434,7 +440,7 @@
     (= index (Ramp (Ramp base (IntImm32 1) m-lanes) (Broadcast n-stride m-lanes) n-lanes))
     (= ty (BFloat 16 _lanes))
 ) (
-    (let new-e (Call "tile_load" ty (vec-of (IntImm16 n-lanes) (IntImm16 (* m-lanes 2)) (Var (Handle 1) name) base n-stride)))
+    (let new-e (Call "tile_load" ty (vec-of (IntImm16 n-lanes) (IntImm16 (* m-lanes 2)) (Var (Handle 1) name) base n-stride) (Intrinsic)))
     (union e new-e)
 ) :ruleset amx)
 
@@ -483,7 +489,8 @@
                     (Bop (Mul) base (IntImm32 bytes))
                     (Bop (Mul) n-stride (IntImm32 bytes))
                     tile
-                    ))))
+                    )
+            (Intrinsic))))
     (union s new-s)
 ) :ruleset amx)
 

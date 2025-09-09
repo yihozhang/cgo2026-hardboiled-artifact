@@ -26,6 +26,7 @@ public:
     int parse_int();
     double parse_double();
     std::vector<Expr> parse_vec_expr();
+    Call::CallType parse_call_type();
     Stmt parse_stmt();
 
 private:

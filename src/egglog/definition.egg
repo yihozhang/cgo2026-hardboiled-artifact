@@ -42,6 +42,15 @@
     (BFloat i64 i64)
     (Handle i64)
 )
+(datatype CallType
+    (Image)
+    (Extern)
+    (ExternCPlusPlus)
+    (PureExtern)
+    (Halide)
+    (Intrinsic)
+    (PureIntrinsic)
+)
 
 (sort Stmt)
 (sort VecInt (Vec i64))
@@ -68,7 +77,7 @@
 ;; TODO: Not sure if we need this one, binding is tricky
 (function Let (String Expr Expr) Expr)
 ;; This one is also tricky
-(function Call (String Type VecExpr) Expr)
+(function Call (String Type VecExpr CallType) Expr)
 ;; name
 ;; TODO: there are some arguments that are ignored here
 (function Var (Type Variable) Expr)

@@ -739,7 +739,7 @@ protected:
         } else if (op->memory_type != MemoryType::WMMAA && op->memory_type != MemoryType::WMMAB) {
             return IRMutator::visit(op);
         }
-        
+
         no_accelerator_allocations = false;
 
         std::map<string, MemoryType> curr_vars_memory_type(this->vars_memory_type);
@@ -1238,7 +1238,7 @@ struct SubstStores : public EqSatIRMutator {
         can_merge = can_merge && equal(simplify(base1 + length1 * stride), simplify(base2));
 
         return false;
-//        return can_merge;
+        //        return can_merge;
     }
 
     Expr merge_shuffles(const Call *new_call, const Call *existing_call) {
@@ -1517,9 +1517,10 @@ class EnforceWMMALanes : public IRMutator {
     std::map<string, Type> intrinsic_types = {
         {"wmma.load.a.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m16n16k16.f16", Int(32, 8)},
+        {"wmma.load.b.sync.aligned.col.m16n16k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32", Float(32, 8)},
+        {"wmma.mma.sync.aligned.row.col.m16n16k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8)},
-
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4)},
 
         {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
@@ -1527,12 +1528,14 @@ class EnforceWMMALanes : public IRMutator {
         {"wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m32n8k16.f16", Float(32, 4)},
-        
+        {"wmma.mma.sync.aligned.row.row.m32n8k16.f16.f16", Float(32, 4)},
+
         {"wmma.load.a.sync.aligned.row.m8n32k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m8n32k16.f16", Int(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m8n32k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m8n32k16.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m8n32k16.f16", Float(32, 4)},
+        {"wmma.mma.sync.aligned.row.row.m8n32k16.f16.f16", Float(32, 4)},
     };
 
     Expr get_nth_tile_from_tile_index_wmma(const Expr &e) {
@@ -1879,12 +1882,12 @@ protected:
             auto repeat_stride = repeat_stride_opt.value();
             auto repeat_count = repeat_count_opt.value();
             auto ty = Float(16, l1 * repeat_count);
-            Expr vec1 = Load::make(ty, var->name, 
-                Ramp::make(
-                    Ramp::make(base_r, stride_r, l1), 
-                    Broadcast::make(IntImm::make(Int(32), repeat_stride), l1), 
-                    repeat_count
-                ), {}, {}, const_true(l1 * repeat_count), {});
+            Expr vec1 = Load::make(ty, var->name,
+                                   Ramp::make(
+                                       Ramp::make(base_r, stride_r, l1),
+                                       Broadcast::make(IntImm::make(Int(32), repeat_stride), l1),
+                                       repeat_count),
+                                   {}, {}, const_true(l1 * repeat_count), {});
             Expr vec2 = FloatImm::make(Float(16), 0);
             vector<int> indices;
             for (int j = 0; j < (l1 / steps) + l2; j++) {

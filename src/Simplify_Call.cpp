@@ -629,6 +629,11 @@ Expr Simplify::visit(const Call *op, ExprInfo *info) {
         // with a bit more cleverness; not sure if the reduced lookup time
         // would pay for itself (in comparison with the possible lost code clarity).
 
+        Expr unbroadcast = lift_elementwise_broadcasts(op->type, op->name, op->args, op->call_type);
+        if (unbroadcast.defined()) {
+            return mutate(unbroadcast, info);
+        }
+
         // Handle all the PureExtern cases of float -> bool
         {
             using FnType = bool (*)(double);

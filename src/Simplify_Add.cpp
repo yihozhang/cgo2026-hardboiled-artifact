@@ -186,6 +186,10 @@ Expr Simplify::visit(const Add *op, ExprInfo *info) {
                rewrite(x + ((c0 - x)/c1 + y)*c1, y * c1 - ((c0 - x) % c1) + c0, c1 > 0) ||
                rewrite(x + (y + (c0 - x)/c1)*c1, y * c1 - ((c0 - x) % c1) + c0, c1 > 0) ||
 
+               // For recursive filtering
+               rewrite((x/c0*c2 + ((x%c0)*c1 + z)), x * c1 + z, c2 == c0 * c1) ||
+               rewrite(x / c0 * c1 + x / c2 % c1, x / c2, c0 == c2 * c1) ||
+
                false)))) {
             return mutate(rewrite.result, info);
         }

@@ -44,6 +44,7 @@ add_halide_generator(conv1d.generator SOURCES conv1d_generator.cpp)
 add_halide_generator(conv2d.generator SOURCES conv2d_generator.cpp)
 add_halide_generator(upsample.generator SOURCES upsample_generator.cpp)
 add_halide_generator(downsample.generator SOURCES downsample_generator.cpp)
+add_halide_generator(resize.generator SOURCES resize_generator.cpp)
 add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
 add_halide_generator(conv_layer.generator SOURCES conv_layer_generator.cpp)
 add_halide_generator(attention.generator SOURCES attention_generator.cpp)
@@ -65,6 +66,10 @@ add_conv_library(downsample_lib downsample host-cuda-cuda_capability_80)
 add_conv_library(downsample_lib_win downsample x86-64-windows-cuda-cuda_capability_80)
 add_conv_library(downsample_lib_linux downsample x86-64-linux-cuda-cuda_capability_80)
 
+add_conv_library(resize_lib resize host-cuda-cuda_capability_80)
+add_conv_library(resize_lib_win resize x86-64-windows-cuda-cuda_capability_80)
+add_conv_library(resize_lib_linux resize x86-64-linux-cuda-cuda_capability_80)
+
 add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_80)
@@ -83,6 +88,7 @@ add_executable(conv2d process.cpp)
 add_executable(matmul process.cpp)
 add_executable(upsample process.cpp)
 add_executable(downsample process.cpp)
+add_executable(resize process.cpp)
 add_executable(conv_layer process.cpp)
 add_executable(attention process.cpp)
 
@@ -127,6 +133,18 @@ target_compile_definitions(downsample
     BENCHMARK_HEADER="downsample_lib.h"
     BENCHMARK_NAME="downsample"
     RUN_downsample
+    KERNEL_SIZE=${CONV_KERNEL_SIZE}
+    IMG_ROW=${CONV_IMG_ROW}
+    IMG_COL=${CONV_IMG_COL}
+    SCHEDULE="${SCHEDULE}"
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
+target_compile_definitions(resize
+    PRIVATE
+    BENCHMARK_HEADER="resize_lib.h"
+    BENCHMARK_NAME="resize"
+    RUN_resize
     KERNEL_SIZE=${CONV_KERNEL_SIZE}
     IMG_ROW=${CONV_IMG_ROW}
     IMG_COL=${CONV_IMG_COL}

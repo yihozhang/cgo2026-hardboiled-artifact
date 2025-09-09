@@ -111,19 +111,19 @@ LLVM_CXX_FLAGS += -DLLVM_VERSION=$(LLVM_VERSION_TIMES_10)
 # line, or define an environment variable WITH_FOO that has an empty
 # value.
 WITH_X86 ?= $(findstring x86, $(LLVM_COMPONENTS))
-WITH_ARM ?= $(findstring arm, $(LLVM_COMPONENTS))
-WITH_HEXAGON ?= $(findstring hexagon, $(LLVM_COMPONENTS))
-WITH_RISCV ?= $(findstring riscv, $(LLVM_COMPONENTS))
-WITH_AARCH64 ?= $(findstring aarch64, $(LLVM_COMPONENTS))
-WITH_POWERPC ?= $(findstring powerpc, $(LLVM_COMPONENTS))
+WITH_ARM ?= 
+WITH_HEXAGON ?= 
+WITH_RISCV ?= 
+WITH_AARCH64 ?= 
+WITH_POWERPC ?= 
 WITH_NVPTX ?= $(findstring nvptx, $(LLVM_COMPONENTS))
-WITH_WEBASSEMBLY ?= $(findstring webassembly, $(LLVM_COMPONENTS))
-WITH_OPENCL ?= not-empty
-WITH_METAL ?= not-empty
-WITH_D3D12 ?= not-empty
-WITH_VULKAN ?= not-empty
-WITH_SPIRV ?= not-empty
-WITH_WEBGPU ?= not-empty
+WITH_WEBASSEMBLY ?= 
+WITH_OPENCL ?= 
+WITH_METAL ?= 
+WITH_D3D12 ?= 
+WITH_VULKAN ?=
+WITH_SPIRV ?= 
+WITH_WEBGPU ?= 
 WITH_EXCEPTIONS ?=
 WITH_LLVM_INSIDE_SHARED_LIBHALIDE ?= not-empty
 
@@ -884,11 +884,11 @@ RUNTIME_CPP_COMPONENTS = \
   windows_profiler \
   windows_threads \
   windows_threads_tsan \
-  windows_vulkan \
   windows_yield \
   write_debug_image \
-  vulkan \
   x86_cpu_features \
+#   windows_vulkan \
+#   vulkan \
 
 RUNTIME_LL_COMPONENTS = \
   aarch64 \
