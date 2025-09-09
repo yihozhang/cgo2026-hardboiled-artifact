@@ -19,15 +19,15 @@ public:
     Output<Buffer<float>> f{"f"};
 
     
-    int delay_factor = 16;
-    int tile_width = 64 * 16;
+    int delay_factor;
+    int tile_width;
 
     void generate() {
         if (gpu_schedule == Schedule::CUDA) {
-            // Keep them the same for now
-            tile_width = 64 * 16;
+            tile_width = 1024;
         } else {
-            tile_width = 64 * 16;
+            delay_factor = 16;
+            tile_width = 4096;
         }
         /*---------------------------------*
         |  Compute A and B                 |
@@ -109,6 +109,7 @@ public:
             *---------------------------------*/
             g_delay(mii, mi, mo, n) = g((mo * delay_factor + mi) * delay_factor + mii, n);
 
+            w = {0, delay_factor, "w"};
             h(mii, mi, mo, n) = cast<float>(0.f);
             h(mii, mi, mo, n) += cast<float>(A(mii, w)) * cast<float>(g_delay(w, mi, mo, n));
 
@@ -159,9 +160,10 @@ public:
             a1.compute_root().unroll(m);
             fi
                 .compute_root()
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi);
+                .split(mi, mi, mii, 32)
+                .gpu_blocks(mo, n)
+                .gpu_threads(mii)
+                .unroll(mi, 4);
             fi
                 .update()
                 .split(mo, moo, moi, 32)
@@ -171,9 +173,10 @@ public:
 
             fct
                 .compute_root()
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi);
+                .split(mi, mi, mii, 32)
+                .gpu_blocks(mo, n)
+                .gpu_threads(mii)
+                .unroll(mi);
             fct
                 .update()
                 .atomic(true)
@@ -181,14 +184,12 @@ public:
                 .gpu_threads(r_tail.y)
                 .unroll(r_tail.x);
 
-            // can be optimized
             f
                 .compute_root()
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi)
-                ;
-            if (!debug) f.unroll(mi, 8);
+                .split(mi, mi, mii, 32)
+                .gpu_blocks(mo, n)
+                .gpu_threads(mii)
+                .unroll(mi, 4);
             f
                 .update(0)
                 .atomic(true)
@@ -320,7 +321,7 @@ private:
     Func fi{"fi"}, ft{"ft"}, fct{"fct"};
 
     RDom wA, wB;
-    RDom w{0, delay_factor, "w"};
+    RDom w;
     RDom r;
     RDom r0, r2;
     RDom r_tail;

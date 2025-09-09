@@ -366,9 +366,11 @@ int main(int argc, char **argv) {
 
     img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
 
+    int delay_factor = 16;
+    int tile_width = 4096;
     bool is_tc = strcmp(SCHEDULE, "tensorcore") == 0;
     // Create output buffer
-    Buffer<float> output = is_tc ? Buffer<float>(16, 64, M/16/64, N) : Buffer<float>(1024, M/1024, N);
+    Buffer<float> output = is_tc ? Buffer<float>(delay_factor, (tile_width/delay_factor), M/tile_width, N) : Buffer<float>(tile_width, M/tile_width, N);
     // TODO: I don't know why we need extent order + 2 instead of order + 1 for the coeff array
     Buffer<float> coeff(4);
     // float a = 0.9, b = -0.45;
@@ -429,7 +431,7 @@ int main(int argc, char **argv) {
                 expected[x][y] = halide_float16_bits_to_float(img(x, y)) +
                     (x > 0 ? expected[x-1][y] * a : 0.f) + 
                     (x > 1 ? expected[x-2][y] * b : 0.f);
-                auto o = is_tc ? output(x%16,(x/16)%64, x/16/64, y) : output(x%1024,x/1024, y);
+                auto o = is_tc ? output(x%delay_factor,(x%tile_width)/delay_factor, x/tile_width, y) : output(x%tile_width,x/tile_width, y);
                 // std::cout << expected[x][y] << " " << o << " " << halide_float16_bits_to_float(img(x, y)) << "\n";
                 if (fabs(expected[x][y] - o) > 0.01f) {
                     std::cerr << "Error at (" << x << ", " << y << "): "
