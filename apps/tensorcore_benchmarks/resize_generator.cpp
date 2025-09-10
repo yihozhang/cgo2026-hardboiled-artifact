@@ -248,7 +248,7 @@ public:
                 .align_bounds(y, 16)
                 .reorder(c, x, y)
                 .unroll(c)
-                .gpu_tile(x, y, xi, yi, 32, 32, TailStrategy::RoundUp)  // TODO: Try 128x4
+                .gpu_tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)  // TODO: Try 128x4
                 .tile(xi, yi, xii, yii, 2, 4)
                 .unroll(xii)
                 .unroll(yii);
@@ -290,7 +290,7 @@ public:
             kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
             break;
         case Schedule::TensorCore:
-            // kernel_x.reorder_storage(k, x);
+            kernel_x.reorder_storage(k, x);
             kernel_y.reorder_storage(k, y);
 
             Var xii{"xii"}, yii{"yii"}, xio{"xio"};
