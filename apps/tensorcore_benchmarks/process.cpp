@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
         }
     }
 #elif defined(RUN_denoise)
-    Buffer<uint16_t> img(IMG_COL, IMG_ROW, 3), out(IMG_COL - 16, IMG_ROW - 16, 3);
+    Buffer<Halide::float16_t> img(IMG_COL, IMG_ROW, 3), out(IMG_COL - 16, IMG_ROW - 16, 3);
     for (int c = 0; c < img.channels(); c++) {
         for (int y = 0; y < img.height(); y++) {
             for (int x = 0; x < img.width(); x++) {
@@ -216,11 +216,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-    out.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-
     auto time = benchmark(5, 5, [&]() {
-        denoise(img.raw_buffer(), 0.1, out.raw_buffer());
+        denoise(img, 0.1, out);
         out.device_sync();
     });
 
@@ -242,8 +239,8 @@ int main(int argc, char **argv) {
 
     Buffer<uint8_t, 3> out_8(out.width(), out.height(), 3);
     Buffer<uint8_t, 3> img_8(img.width(), img.height(), 3);
-    out_8.for_each_value([](uint8_t &v, uint16_t v16) { v = float16_to_float(v16) * 255.999f; }, out);
-    img_8.for_each_value([](uint8_t &v, uint16_t v16) { v = float16_to_float(v16) * 255.999f; }, img);
+    out_8.for_each_value([](uint8_t &v, Halide::float16_t v16) { v = float(v16) * 255.999f; }, out);
+    img_8.for_each_value([](uint8_t &v, Halide::float16_t v16) { v = float(v16) * 255.999f; }, img);
     Halide::Tools::save_image(img_8, "denoised_img.png");
     Halide::Tools::save_image(out_8, "denoised_out.png");
 
@@ -330,216 +327,6 @@ int main(int argc, char **argv) {
         }
     }
 
-#elif defined(RUN_rec_filter)
-    const int M = IMG_COL;  // by default this is 1024*1024
-    const int N = 2;        // stereo audio
-    
-    std::string benchmark_name = BENCHMARK_NAME;
-
-    std::cout << "Running " << benchmark_name << " with:" << std::endl;
-
-    std::cout << "  Image size: " << N << "x" << M << std::endl;
-    std::cout << "  Schedule: " << SCHEDULE << std::endl;
-
-    // Create matrix buffers with random values
-    Buffer<Halide::float16_t> img(M, N);
-    for (int y = 0; y < N; y++) {
-        for (int x = 0; x < M; x++) {
-            img(x, y) = Halide::float16_t(rand() & 1);  // uint16_t(rand() % 20);
-        }
-    }
-
-    // Create output buffer
-    Buffer<float> output(16, M / 16, N);
-
-    float a = 0.9, b = -0.45;
-    // Call the generated function
-    auto time = benchmark(5, 5, [&]() {
-        // NB: Hardcode the coefficients for now
-        rec_filter(img, 0, a, b, output);
-        output.device_sync();
-    });
-
-    if (output.has_device_allocation()) {
-        output.copy_to_host();
-    }
-
-    output.device_sync();
-
-    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
-
-    {
-        int delay_factor = 16;
-        int order = 2;
-        float a[] = {0, 2, -1};
-        float a1[3][17] = {0.f};
-
-        a1[0][0] = 1.;
-        for (int o = 0; o < order; o++) {
-            for (int i = 1; i <= delay_factor; i++) {
-                for (int j = 1; j <= i; j++) {
-                    if (j + o <= order) {
-                        a1[o][i] += a1[0][i - j] * a[j + o];
-                    }
-                }
-            }
-        }
-    }
-
-    // Verify results
-    if (VERIFY_OUTPUT) {
-        float expected[100000][2] = {0.f};
-        bool success = true;
-        for (int y = 0; y < 2; y++) {
-            if (!success) {
-                break;
-            }
-            for (int x = 0; x < 100000; x++) {
-                if (!success) {
-                    break;
-                }
-                expected[x][y] = float16_to_float(img(x, y)) +
-                                 (x > 0 ? expected[x - 1][y] * a : 0.f) +
-                                 (x > 1 ? expected[x - 2][y] * b : 0.f);
-                if (fabs(expected[x][y] - output(x % 16, x / 16, y)) > 0.001f) {
-                    std::cerr << "Error at (" << x << ", " << y << "): "
-                              << std::fixed << std::setprecision(10)
-                              << output(x % 16, x / 16, y) << " != " << expected[x][y] << "\n";
-                    success = false;
-                }
-            }
-        }
-
-        if (success) {
-            std::cout << "Outputs match!\n";
-            return 0;
-        } else {
-            std::cout << "Outputs do not match...\n";
-            return 1;
-        }
-    }
-#elif defined(RUN_resize)
-    // Create test data using compile-time definitions
-    const int M = IMG_COL;
-    const int N = IMG_ROW;
-    const int C = 3;
-
-    const std::vector<float> scales = {0.07, 0.12, 0.25, 0.75, 0.9, 0.99};  //, 1.01, 1.1, 1.5, 2., 2.5, 4};
-    std::string benchmark_name = BENCHMARK_NAME;
-
-    std::cout << "Running " << benchmark_name << " with:" << std::endl;
-    std::cout << "  Image size: " << N << "x" << M << std::endl;
-    std::cout << "  Schedule: " << SCHEDULE << std::endl;
-
-    for (const float scale : scales) {
-        std::cout << "  scale: " << scale << std::endl;
-
-        const int OM = M * scale;
-        const int ON = N * scale;
-
-        // Make a pinwheel so that the quality of the resample is apparent
-        Buffer<uint16_t, 3> img(M, N, C);
-        int R = std::min(M, N) / 2 - 10;
-        FOR(c, C) {
-            FOR(y, N) {
-                double dy = y - N / 2 + 0.5 / scale;
-                FOR(x, M) {
-                    double dx = x - M / 2 + 0.5 / scale;
-                    if (dx * dx + dy * dy > R * R) {
-                        img(x, y, c) = float_to_float16(0.5f);
-                    } else {
-                        double theta = atan2(dy, dx);
-                        bool white = ((int)((theta / M_PI + 1) * 300 + 0.5)) & 1;
-                        img(x, y, c) = white ? float_to_float16(1.0f) : float_to_float16(0.f);
-                    }
-                }
-            }
-        }
-
-        // smallest multiple of 32 that is greater than OM and ON.
-        const int OM_realized = (OM + 31) & ~31;
-        const int ON_realized = (ON + 31) & ~31;
-        Buffer<uint16_t, 3> output(OM_realized, ON_realized, C);
-
-        img.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-        output.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-
-        auto resize = scale > 1.0f ? resize_up : resize_down;
-
-        auto time = benchmark(5, 5, [&]() {
-            resize(img.raw_buffer(), scale, output.raw_buffer());
-            output.device_sync();
-        });
-
-        if (output.has_device_allocation()) {
-            output.copy_to_host();
-        }
-        output.device_sync();
-
-        Buffer<uint8_t, 3> output_8(OM, ON, C);
-        FOR(c, C) {
-            FOR(y, ON) {
-                FOR(x, OM) {
-                    float f = float16_to_float(output(x, y, c));
-                    output_8(x, y, c) = (uint8_t)(f * 255.999f);
-                }
-            }
-        }
-        Halide::Tools::save_image(output_8, "pinwheel_" + std::to_string(scale) + ".png");
-
-        std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
-
-        if (VERIFY_OUTPUT) {
-            uint16_t *expected = new uint16_t[OM * ON * C];
-            resize_sim((uint16_t *)img.raw_buffer()->host, expected, M, N, C, scale);
-
-            // FOR (y, 16) {
-            //     FOR (x, 16) {
-            //         std::cout << std::fixed << std::setprecision(4) << img(x, y, 0) << " ";
-            //     }
-            //     std::cout << "\n";
-            // }
-            // std::cout << "\n";
-            // FOR (y, 16) {
-            //     FOR (x, 16) {
-            //         std::cout << std::fixed << std::setprecision(4) << output(x, y, 0) << " ";
-            //     }
-            //     std::cout << "\n";
-            // }
-            // std::cout << "\n";
-            // FOR (y, 16) {
-            //     FOR (x, 16) {
-            //         std::cout << std::fixed << std::setprecision(4) << expected[y * OM + x] << " ";
-            //     }
-            //     std::cout << "\n";
-            // }
-            bool success = true;
-            FOR(c, C) {
-                if (!success) break;
-                FOR(y, ON) {
-                    if (!success) break;
-                    FOR(x, OM) {
-                        float exp = float16_to_float(expected[c * OM * ON + y * OM + x]);
-                        float out = float16_to_float(output(x, y, c));
-                        if (fabs(exp - out) > 0.01f) {
-                            std::cerr << "Error at (" << x << ", " << y << ", " << c << "): "
-                                      << std::fixed << std::setprecision(10)
-                                      << out << " != " << exp << "\n";
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (success) {
-                std::cout << "Outputs match!\n";
-            } else {
-                std::cout << "Outputs do not match...\n";
-                return 1;
-            }
-        }
-    }
 #elif defined(RUN_conv_layer)
     // Create test data using compile-time definitions
     const int N = NN_TENSOR_N;
@@ -680,111 +467,4 @@ int main(int argc, char **argv) {
 #endif
 
     return 0;
-}
-
-float sinc(float x) {
-    x *= 3.14159265359f;
-    return sin(x) / x;
-}
-
-constexpr int lanczos_lobes = 3;
-
-float lanczos(float x) {
-    float value = sinc(x) * sinc(x / lanczos_lobes);
-    value = x == 0.0f ? 1.0f : value;                                  // Take care of singularity at zero
-    value = (x > lanczos_lobes || x < -lanczos_lobes) ? 0.0f : value;  // Clamp to zero out of bounds
-    return value;
-}
-
-float clamp(float x, float l, float h) {
-    return std::min(std::max(x, l), h);
-}
-
-void resize_sim(uint16_t *input, uint16_t *output, int m, int n, int C, float scale_factor) {
-    const int taps = 2 * lanczos_lobes;
-    bool upsample = scale_factor > 1.0f;
-
-    float inverse_scale_factor = 1.0f / scale_factor;
-
-    float kernel_scaling = upsample ? 1.0f : scale_factor;
-    float inverse_kernel_scaling = upsample ? 1.0f : inverse_scale_factor;
-
-    float kernel_radius = 0.5f * taps * inverse_kernel_scaling;
-
-    int kernel_taps = int(ceil(taps * inverse_kernel_scaling));
-
-    int resized_m = int(m * scale_factor);
-    int resized_n = int(n * scale_factor);
-
-    float *kernel_x = new float[kernel_taps * resized_m];
-    float *kernel_y = new float[kernel_taps * resized_n];
-
-    FOR(x, resized_m) {
-        float sum = 0.f;
-        FOR(k, kernel_taps) {
-            float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
-            int beginx = int(ceil(sourcex - kernel_radius));
-            // Compared to the original app, don't need to +1 here because max = min + extent - 1
-            beginx = clamp(beginx, 0, m - kernel_taps);
-            kernel_x[x * kernel_taps + k] = lanczos((k + beginx - sourcex) * kernel_scaling);
-            sum += kernel_x[x * kernel_taps + k];
-        }
-        FOR(k, kernel_taps) {
-            kernel_x[x * kernel_taps + k] /= sum;
-        }
-    }
-
-    FOR(y, resized_n) {
-        float sum = 0.f;
-        FOR(k, kernel_taps) {
-            float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
-            int beginy = int(ceil(sourcey - kernel_radius));
-            beginy = clamp(beginy, 0, n - kernel_taps);
-            kernel_y[y * kernel_taps + k] = lanczos((k + beginy - sourcey) * kernel_scaling);
-            sum += kernel_y[y * kernel_taps + k];
-        }
-        FOR(k, kernel_taps) {
-            kernel_y[y * kernel_taps + k] /= sum;
-        }
-    }
-
-    float *resized_y = new float[m * resized_n * C];
-
-    FOR(c, C) {
-        FOR(y, resized_n) {
-            float sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
-            int beginy = int(ceil(sourcey - kernel_radius));
-            beginy = clamp(beginy, 0, n - kernel_taps);
-            FOR(x, m) {
-                resized_y[c * resized_n * m + y * m + x] = 0.f;
-                FOR(r, kernel_taps) {
-                    resized_y[c * resized_n * m + y * m + x] +=
-                        kernel_y[y * kernel_taps + r] *
-                        Halide::float16_t(input[c * n * m + (beginy + r) * m + x]);
-                }
-            }
-        }
-    }
-
-    FOR(c, C) {
-        FOR(y, resized_n) {
-            FOR(x, resized_m) {
-                float out = 0.f;
-                float sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
-                int beginx = int(ceil(sourcex - kernel_radius));
-                beginx = clamp(beginx, 0, m - kernel_taps);
-                FOR(r, kernel_taps) {
-                    out +=
-                        kernel_x[x * kernel_taps + r] *
-                        resized_y[c * resized_n * m + y * m + r + beginx];
-                }
-                output[c * resized_n * resized_m + y * resized_m + x] =
-                    Halide::float16_t(clamp(out, 0.f, 1.f));
-            }
-        }
-    }
-
-    delete[] kernel_x;
-    delete[] kernel_y;
-    delete[] resized_y;
 }

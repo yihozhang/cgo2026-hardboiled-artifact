@@ -1522,6 +1522,7 @@ class EnforceWMMALanes : public IRMutator {
         {"wmma.mma.sync.aligned.row.col.m16n16k16.f32.f32", Float(32, 8)},
         {"wmma.load.c.sync.aligned.row.m16n16k16.f32", Float(32, 8)},
         {"wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16", Float(32, 4)},
+        {"wmma.mma.sync.aligned.row.col.m16n16k16.f16.f16", Float(32, 4)},
 
         {"wmma.load.a.sync.aligned.row.m32n8k16.f16", Int(32, 8)},
         {"wmma.load.b.sync.aligned.row.m32n8k16.f16", Int(32, 8)},

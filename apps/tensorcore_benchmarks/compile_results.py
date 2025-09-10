@@ -26,16 +26,18 @@ benchmarks = [
     #{"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
 
     # Matmul
-    #{"-b": "matmul", "-mm_mnk": 1024,  "-v": True},
+    #{"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": True},
     #{"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
     #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
 
     # Conv Layer (NHWC)
     #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": False},
     #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [256, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [512, 64, 64, 32], "-v": False},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [1024, 64, 64, 32], "-v": False},
     #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [2048, 64, 64, 32], "-v": False},
     #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [4096, 64, 64, 32], "-v": False},
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [8192, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [8192, 64, 64, 32], "-v": False},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -148,7 +150,7 @@ def dict_to_cmd_args(benchmark_dict):
             args.append(flag)
         elif flag == "-v" and not value:
             continue
-        elif flag == "-nhwc":
+        elif isinstance(value, list):
             args.append(flag)
             args += [str(v) for v in value]
         else:

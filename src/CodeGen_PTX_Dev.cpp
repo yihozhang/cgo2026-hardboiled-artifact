@@ -415,8 +415,6 @@ void CodeGen_PTX_Dev::visit(const AssertStmt *op) {
 }
 
 void CodeGen_PTX_Dev::visit(const Load *op) {
-    std::cout << "Genning a Load " << op->name << " " << op->index << std::endl;
-
     // Do aligned 4-wide 32-bit loads as a single i128 load.
     const Ramp *r = op->index.as<Ramp>();
     // TODO: lanes >= 4, not lanes == 4

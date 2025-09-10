@@ -31,6 +31,7 @@
 (WMMAGEMM (Tile 32 8 16) (RowMajor) (RowMajor) "wmma.mma.sync.aligned.row.row.m32n8k16.f32.f32" 32)
 (WMMAGEMM (Tile 8 32 16) (RowMajor) (RowMajor) "wmma.mma.sync.aligned.row.row.m8n32k16.f32.f32" 32)
 (WMMAGEMM (Tile 16 16 16) (RowMajor) (RowMajor) "wmma.mma.sync.aligned.row.row.m16n16k16.f16.f16" 16)
+(WMMAGEMM (Tile 16 16 16) (RowMajor) (ColMajor) "wmma.mma.sync.aligned.row.col.m16n16k16.f16.f16" 16)
 (WMMAGEMM (Tile 32 8 16) (RowMajor) (RowMajor) "wmma.mma.sync.aligned.row.row.m32n8k16.f16.f16" 16)
 (WMMAGEMM (Tile 8 32 16) (RowMajor) (RowMajor) "wmma.mma.sync.aligned.row.row.m8n32k16.f16.f16" 16)
 (relation WMMATileD (WMMATileConfig Layout String i64))
@@ -65,6 +66,7 @@
         (WMMAShape e rows cols)
     ))
 
+;; these 2 rules are sketchy and need more predicates to be correct
 (rule (
         (= e (Load (Float bits _lanes) (V tile-name) load-index))
         (WMMAAllocation tile-name n-lanes m-lanes)
@@ -107,16 +109,16 @@
 ))
 
 (rule (
-        (= e (Bop uniform-op (WMMA2Mem e1) e2))
-        (= e2 (Broadcast _val lanes))
-        (WMMAShape e1 rows cols)
-        (= lanes (* rows cols))
-        (UniformBinOps uniform-op)
-    ) (
-        (let e_new (Bop uniform-op e1 e2))
-        (WMMAShape e_new rows cols)
-        (union e (WMMA2Mem e_new))
-    ))
+    (= e (Bop uniform-op (WMMA2Mem e1) e2))
+    (= e2 (Broadcast _val lanes))
+    (WMMAShape e1 rows cols)
+    (= lanes (* rows cols))
+    (UniformBinOps uniform-op)
+) (
+    (let e_new (Bop uniform-op e1 e2))
+    (WMMAShape e_new rows cols)
+    (union e (WMMA2Mem e_new))
+))
 
 (relation wmma-f16-rhs (
     Expr ;; orig-expr
@@ -275,7 +277,7 @@
     
         (WMMAShape e rows cols)
 
-        (WMMATileC (Tile rows cols _k) intrinsic bits)
+        (WMMATileC (Tile rows cols _k) (RowMajor) intrinsic bits)
     ) (
         (let load-var (ExprVar (Mem) hal-expr))
         (let new-e (Call intrinsic (Float bits (* rows cols)) (vec-of (Var (Handle 1) load-var) (IntImm32 0) (IntImm32 cols)) (Intrinsic)))
@@ -342,7 +344,7 @@
 
     (= store-index (Ramp store-base (IntImm32 1) tot-lanes))
 
-    (WMMATileD (Tile n-lanes m-lanes _k) intrinsic bits)
+    (WMMATileD (Tile n-lanes m-lanes _k) (RowMajor) intrinsic bits)
 ) (
     (let new-s (Evaluate
             (Call intrinsic (Int 32 1)
