@@ -11,7 +11,7 @@ public:
     GeneratorParam<Schedule> gpu_schedule{
         "gpu_schedule", Schedule::CUDA,         //
         {                                       //
-         {"cuda_only", Schedule::CUDA},         //
+         {"cudaonly", Schedule::CUDA},         //
          {"tensorcore", Schedule::TensorCore}}  //
     };
 
@@ -123,7 +123,7 @@ public:
             const int wmmaTileX = 256;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = kSize;
+            const int reductionTileX = 16;
             const int reductionTileY = 4;
 
             /*---------------------------------*

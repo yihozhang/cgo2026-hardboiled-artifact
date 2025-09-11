@@ -9,7 +9,7 @@ using namespace Halide;
 class RecFilter : public Halide::Generator<RecFilter> {
 public:
     // Generator Params
-    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cuda_only", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
+    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cudaonly", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
 
     // Input: 2-channel float16 audio
     Input<Buffer<float16_t>> g{"g", 2};

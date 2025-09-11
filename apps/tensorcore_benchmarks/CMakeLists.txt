@@ -19,7 +19,7 @@ set(MATMUL_N 4096 CACHE STRING "Columns of the input matrix B")
 set(MATMUL_K 4096 CACHE STRING "Columns of the input matrix A / Rows of the input matrix B")
 
 # General Parameters
-set(SCHEDULE "tensorcore" CACHE STRING "GPU schedule to use (cuda_only or tensorcore)")
+set(SCHEDULE "tensorcore" CACHE STRING "GPU schedule to use (cudaonly or tensorcore)")
 set(VERIFY_OUTPUT false CACHE STRING "Verify output was correct (true or false); might take long for large inputs")
 
 # Find Halide
