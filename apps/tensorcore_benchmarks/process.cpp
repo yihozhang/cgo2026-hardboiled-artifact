@@ -508,7 +508,7 @@ int main(int argc, char **argv) {
     const int N = IMG_ROW;
     const int C = 3;
 
-    const std::vector<float> scales = {0.07, 0.12, 0.25, 0.75};
+    const std::vector<float> scales = {0.07, 0.12, 0.22, 0.45};
     std::string benchmark_name = BENCHMARK_NAME;
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
