@@ -71,7 +71,7 @@ public:
     GeneratorParam<Schedule> gpu_schedule{
         "gpu_schedule", Schedule::CUDA,         //
         {                                       //
-         {"cuda_only", Schedule::CUDA},         //
+         {"cudaonly", Schedule::CUDA},         //
          {"tensorcore", Schedule::TensorCore}}  //
     };
 

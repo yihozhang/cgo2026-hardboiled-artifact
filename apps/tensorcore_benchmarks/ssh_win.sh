@@ -11,7 +11,7 @@ SSH_HOST="192.168.4.123"
 
 # Default values
 BENCHMARK="conv1d"
-SCHEDULE="cuda_only"
+SCHEDULE="cudaonly"
 CONV_KERNEL_SIZE="128"
 CONV_IMG_COLS="3840"
 CONV_IMG_ROWS="2160"
@@ -27,7 +27,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  -b,         --benchmark NAME            Benchmark to run (conv1d, conv2d, or matmul) [default: conv1d]"
-    echo "  -s,         --schedule SCHEDULE         Schedule to use (cuda_only or tensorcore) [default: cuda_only]"
+    echo "  -s,         --schedule SCHEDULE         Schedule to use (cudaonly or tensorcore) [default: cudaonly]"
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size for conv [default: 128]"
     echo "  -conv_col,  --img-cols COLS            Image columns for conv [default: 2160]"
     echo "  -conv_row,  --img-rows ROWS            Image rows for conv [default: 3840]"
@@ -41,7 +41,7 @@ show_help() {
     echo "Examples:"
     echo "  $0 -b conv1d -s tensorcore -conv_k 128 -conv_col 2160 -conv_row 3840"
     echo "  $0 -b matmul -s tensorcore -mm_mnk 1024"
-    echo "  $0 -b conv2d -s cuda_only -conv_k 128 -v"
+    echo "  $0 -b conv2d -s cudaonly -conv_k 128 -v"
 }
 
 # Parse command line arguments
