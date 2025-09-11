@@ -1,8 +1,8 @@
 #include "Halide.h"
 #include <stdio.h>
 
-#include "common.h"
 #include "Halide.h"
+#include "common.h"
 
 using namespace Halide;
 
@@ -39,10 +39,12 @@ Expr sinc(Expr x) {
     return sin(x) / x;
 }
 
+constexpr int lanczos_lobes = 3;
+
 Expr kernel_lanczos(Expr x) {
-    Expr value = sinc(x) * sinc(x / 3);
-    value = select(x == 0.0f, 1.0f, value);        // Take care of singularity at zero
-    value = select(x > 3 || x < -3, 0.0f, value);  // Clamp to zero out of bounds
+    Expr value = sinc(x) * sinc(x / lanczos_lobes);
+    value = select(x == 0.0f, 1.0f, value);                                // Take care of singularity at zero
+    value = select(x > lanczos_lobes || x < -lanczos_lobes, 0.0f, value);  // Clamp to zero out of bounds
     return value;
 }
 
@@ -56,7 +58,7 @@ static KernelInfo kernel_info[] = {
     {"box", 1, kernel_box},
     {"linear", 2, kernel_linear},
     {"cubic", 4, kernel_cubic},
-    {"lanczos", 6, kernel_lanczos}};
+    {"lanczos", 2 * lanczos_lobes, kernel_lanczos}};
 
 class Resize : public Halide::Generator<Resize> {
 public:
@@ -66,18 +68,16 @@ public:
     // we can generate different pipelines (we want to reorder the
     // resample in x and in y).
     GeneratorParam<bool> upsample{"upsample", false};
-    GeneratorParam<Schedule> gpu_schedule {
+    GeneratorParam<Schedule> gpu_schedule{
         "gpu_schedule", Schedule::CUDA,         //
         {                                       //
          {"cuda_only", Schedule::CUDA},         //
          {"tensorcore", Schedule::TensorCore}}  //
     };
 
-
-    // We change from void to float for convience
-    Input<Buffer<float, 3>> input{"input"};
+    Input<Buffer<float16_t, 3>> input{"input"};
     Input<float> scale_factor{"scale_factor"};
-    Output<Buffer<float, 3>> output{"output"};
+    Output<Buffer<float16_t, 3>> output{"output"};
 
     // Common Vars
     Var x{"x"}, y{"y"}, c{"c"}, k{"k"};
@@ -101,7 +101,7 @@ public:
         kernel_y{"kernel_y"},
         kernel_sum_x{"kernel_sum_x"},
         kernel_sum_y{"kernel_sum_y"};
-    
+
     Func resized{"resized"};
     Func is_empty_block_x{"is_empty_block_x"}, kernel_blocks_x{"kernel_blocks_x"};
     Func is_empty_block_y{"is_empty_block_y"}, kernel_blocks_y{"kernel_blocks_y"};
@@ -118,18 +118,20 @@ public:
     // arbitrary scaling factor, the filter coefficients are
     // different for each x and y coordinate. Use strict-float to
     // ensure fast-math doesn't mess up our bounds inference.
-    bool strict = true;
+    bool strict = false;  // true;
 
+    // For a given output x coord, what is the first x coord in the input that
+    // we depend on?
     Expr begin_of(Expr x) {
         Expr sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
-        
+
         Expr beginx;
         if (strict) {
             beginx = cast<int>(strict_float(ceil(sourcex - kernel_radius)));
         } else {
             beginx = cast<int>(ceil(sourcex - kernel_radius));
         }
-        beginx = clamp(beginx, input.dim(0).min(), input.dim(0).max() + 1 - kernel_taps);
+
         return beginx;
     }
 
@@ -157,304 +159,216 @@ public:
         Expr sourcex = (x + 0.5f) * inverse_scale_factor - 0.5f;
         Expr sourcey = (y + 0.5f) * inverse_scale_factor - 0.5f;
 
-        Expr beginx = begin_of(x);
-        Expr beginy = begin_of(y);
-        
+        // The relationship between an input row and an output row is linear, so
+        // it can be represented as a matrix. The matrix is very large and
+        // mostly zero however, so we never want to explicitly materialize
+        // it. Each row of the matrix contains a small contiguous number of
+        // non-zeros. We'll therefore represent only a contiguous region, and
+        // remember the column it starts at as a separate expression. We can
+        // start at any column we like! We just need to ensure we store enough
+        // columns. We'll make the start the same for each group of 16
+        // rows. This means we can schedule the inner loop like a matmul, which
+        // gives a large speed-up even when not using tensor cores.
+        constexpr int tile = 16;
 
-        r = {0, kernel_taps, "r"};
+        Expr beginx = begin_of((x / tile) * tile);
+        Expr beginy = begin_of((y / tile) * tile);
+
+        // Moving beginx back like this means we need to represent a longer
+        // contiguous region.
+        Expr extra_zeros = begin_of(tile) - begin_of(0);
+
+        // We'll also round up the output to the next multiple of 16.
+        Expr span = ((kernel_taps + extra_zeros + tile - 1) / tile) * tile;
+
+        // Don't go off the end of the image. Those columns would be zero
+        // anyway.
+        beginx = clamp(beginx, 0, input.width() - span);
+        beginy = clamp(beginy, 0, input.height() - span);
+
+        r = {0, span, "r"};
         const KernelInfo &info = kernel_info[interpolation_type];
 
         unnormalized_kernel_x(x, k) = info.kernel((k + beginx - sourcex) * kernel_scaling);
         unnormalized_kernel_y(y, k) = info.kernel((k + beginy - sourcey) * kernel_scaling);
 
-        kernel_sum_x(x) = sum(unnormalized_kernel_x(x, r), "kernel_sum_x");
-        kernel_sum_y(y) = sum(unnormalized_kernel_y(y, r), "kernel_sum_y");
+        kernel_sum_x(x) += unnormalized_kernel_x(x, r);
+        kernel_sum_y(y) += unnormalized_kernel_y(y, r);
 
+        resized_y(x, y, c) += kernel_y(y, r) * as_float(x, r + beginy, c);
 
-        if (gpu_schedule == Schedule::CUDA) {
-            // no need to convert kernel_x, kernel_y, and input to f16
-            kernel_x(x, k) = unnormalized_kernel_x(x, k) / kernel_sum_x(x);
-            kernel_y(y, k) = unnormalized_kernel_y(y, k) / kernel_sum_y(y);
+        resized_x(x, y, c) += kernel_x(x, r) * resized_y(r + beginx, y, c);
 
-            resized_x(x, y, c) = sum(kernel_x(x, r) * input(r + beginx, y, c), "resized_x");
-            resized_y(x, y, c) = sum(kernel_y(y, r) * resized_x(x, r + beginy, c), "resized_y");
-            resized = resized_y;
-        } else {
-            kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
-            kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
+        output(x, y, c) = clamp(resized_x(x, y, c), cast<float16_t>(0.f), cast<float16_t>(1.f));
 
-            // -------------- original algorithm -------------- 
-            // resized_y(x, y, c) = cast<float16_t>(0.f);
-            // resized_y(x, y, c) += cast<float16_t>(cast<float>(kernel_y(y, r)) * cast<float>(as_float(x, r + beginy, c)));
-            // ------------------------------------------------
+        // Schedule
 
-            // For a block to be non-empty, intervals [16x, 16x+15] and [begin(16y), begin(16y+15)+taps] need to intersect
-            // begin(x) / 16
-            is_empty_block_y(x, y) = 
-                (x * block_size <= begin_of(block_size * y + block_size - 1) + kernel_taps) && 
-                begin_of(block_size * y) <= x * block_size + block_size - 1;
+        Var xi("xi"), yi("yi"), ki("ki");
 
-            // for y by 16
-            //    start_x = floor(begin(y) / 16)
-            //    end_x  = floor(begin(y + 15) / 16) + (ceil(kernel_width / 16) + 1)
-
-            // xi and xo denote rows of the band kernel matrix
-            /*-------------------
-                |r___|__           |
-                |  |r___|__        |
-                |     |r___|       |
-                |        ...       |
-                |                  |
-                |                  |
-                |                  |
-                |                  |
-                -------------------
-            */
-            Expr offset_from_beginy = (xo * block_size + xi) - begin_of(yo * block_size + yi);
-            kernel_blocks_y(xi, yi, xo, yo) = 
-                select(0 <= offset_from_beginy && offset_from_beginy < kernel_taps, kernel_y(yo * block_size + yi, clamp(offset_from_beginy, 0, kernel_taps - 1)), 0);
-
-            ry = {0, block_size, 0, input.dim(1).extent() / 16, "ry"};
-            ry.where(is_empty_block_y(ry.y, yo));
-            resized_y(xi, yi, xo, yo, c) = 0.f;
-            resized_y(xi, yi, xo, yo, c) += 
-                cast<float>(kernel_blocks_y(ry.x, yi, ry.y, yo)) * 
-                cast<float>(as_float(xi + xo * block_size, ry.x + ry.y * block_size, c));
-            resized_yf16(xi, yi, xo, yo, c) = cast<float16_t>(resized_y(xi, yi, xo, yo, c));
-
-            // -------------- original algorithm --------------
-            // resized_x(x, y, c) = 0.f;
-            // resized_x(x, y, c) += cast<float>(kernel_x(x, r)) * cast<float>(resized_y(r + beginx, y, c));
-            // ------------------------------------------------
-
-            // For a block to be non-empty, intervals [16y, 16y+15] and [begin(16x), begin(16x+15)+taps] need to intersect
-            is_empty_block_x(x, y) = 
-                (y * block_size <= begin_of(block_size * x + block_size - 1) + kernel_taps) && 
-                begin_of(block_size * x) <= y * block_size + block_size - 1;
-            
-
-            // yi and yo denote columns of the band kernel matrix
-            /*-------------------
-                | |                |
-                |r|_               |
-                |_| |              |
-                | |r|_             |
-                | |_| |            |
-                |   |r|            |
-                |   |_|            |
-                |      ...         |
-                -------------------
-            */
-            Expr offset_from_beginx = (yo * block_size + yi) - begin_of(xo * block_size + xi);
-            // Need to clamp offset_from_beginx to ensure kernel_x is computed over an appropriate range
-            kernel_blocks_x(xi, yi, xo, yo) = 
-                select(0 <= offset_from_beginx && offset_from_beginx < kernel_taps, kernel_x(xo * block_size + xi, clamp(offset_from_beginx, 0, kernel_taps - 1)), 0);
-            
-            rx = {0, block_size, 0, input.dim(0).extent() / 16, "rx"};
-            rx.where(is_empty_block_x(xo, rx.y));
-            resized_x(xi, yi, xo, yo, c) = 0.f;
-            resized_x(xi, yi, xo, yo, c) += 
-                cast<float>(kernel_blocks_x(xi, rx.x, xo, rx.y)) * 
-                cast<float>(resized_yf16(rx.x, yi, rx.y, yo, c));
-
-            resized(x, y, c) = resized_x(x % block_size, y % block_size, x / block_size, y / block_size, c);
-        }
-        
-        output(x, y, c) = clamp(resized(x, y, c), 0.0f, 1.0f);
-    }
-
-    void schedule() {
-        const bool debug = false;
-        // -------------- kernel_x --------------
-        // unnormalized_kernel_x.reorder_storage(k, x);
-        // kernel_x.reorder_storage(k, x);
-        unnormalized_kernel_x
-            .compute_at(kernel_x, xi);
-        kernel_sum_x
-            .compute_at(kernel_x, xi);
+        // Precompute the sparse matrices
         kernel_x
             .compute_root()
-            .split(x, xo, xi, 32)
-            .reorder(k, xi, xo)
-            .gpu_blocks(xo)
-            .gpu_threads(xi);
+            .gpu_tile(x, k, xi, ki, 32, 8);
+        unnormalized_kernel_x
+            .compute_root()
+            .gpu_tile(x, k, xi, ki, 32, 8);
+        kernel_sum_x.in()
+            .compute_root()
+            .gpu_tile(x, xi, 32);
 
-        // -------------- kernel_y --------------
-        // unnormalized_kernel_y.reorder_storage(k, y);
-        // kernel_y.reorder_storage(k, y);
-        unnormalized_kernel_y
-            .compute_at(kernel_y, yi)
-            .gpu_threads(y);
-        kernel_sum_y
-            .compute_at(kernel_y, yi)
-            .gpu_threads(y);
         kernel_y
             .compute_root()
-            .split(y, yo, yi, 32)
-            .reorder(k, yi, yo)
-            .gpu_blocks(yo)
-            .gpu_threads(yi);
+            .gpu_tile(y, k, yi, ki, 32, 8);
+        unnormalized_kernel_y
+            .compute_root()
+            .gpu_tile(y, k, yi, ki, 32, 8);
+        kernel_sum_y.in()
+            .compute_root()
+            .gpu_tile(y, yi, 32);
 
-        if (gpu_schedule == Schedule::CUDA) {
-            Var xii("xii"), yii("yii");
-            resized_x.compute_root();
-            resized_x
-                .tile(x, y, xii, yii, 32, 8)
-                .tile(x, y, xi, yi, 8, 1)
-                .gpu_blocks(c, x, y)
-                .gpu_threads(xii, yii)
-                .reorder(xii, yii, xi, yi, x, y, c)
-                .unroll(xi)
-                .unroll(yi);
+        Var xii{"xii"}, yii{"yii"};
+
+        output
+            .compute_root()
+            .align_bounds(x, 16)
+            .align_bounds(y, 16);
+
+        switch (gpu_schedule) {
+        case Schedule::CUDA:
+            // For large downsamples, this is the expensive stage. When resizing in
+            // y, the load from the kernel doesn't depend on x and c, and the load from
+            // the image doesn't depend on y % 16, so we can schedule it like a
+            // matrix multiply (i.e. tile it).
+            resized_y.in()
+                .compute_root()
+                .align_bounds(x, 16)
+                .align_bounds(y, 16)
+                .reorder(c, x, y)
+                .unroll(c)
+                .gpu_tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)  // TODO: Try 128x4
+                .tile(xi, yi, xii, yii, 2, 4)
+                .unroll(xii)
+                .unroll(yii);
+            resized_y
+                .compute_at(resized_y.in(), xi)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .update()
+                .reorder(x, y, c, r)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y);
+            as_float.compute_at(resized_y, c).vectorize(x).vectorize(y);
+            kernel_y.in().compute_at(resized_y, r).vectorize(y).vectorize(k);
+
+            // For large downsamples, it's hard to fill the machine, because we've
+            // already downsampled in y. We'll use much smaller tiles and map color
+            // channels to gpu threads instead of unrolling them.
             output
-                .tile(x, y, xii, yii, 32, 8)
-                .tile(x, y, xi, yi, 8, 1)
-                .gpu_blocks(c, x, y)
-                .gpu_threads(xii, yii)
+                .gpu_threads(c)
+                .gpu_tile(x, y, xi, yi, 32, 4, TailStrategy::RoundUp)
+                .reorder(xi, yi, c, x, y)
+                .tile(xi, yi, xii, yii, 2, 2)
+                .vectorize(xii)
+                .unroll(yii);
+
+            resized_x
+                .compute_at(output, xi)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y)
+                .update()
+                .reorder(x, y, c, r)
+                .unroll(c)
+                .unroll(x)
+                .unroll(y);
+            resized_y.in().in().compute_at(resized_x, c).vectorize(y);
+            kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
+            break;
+        case Schedule::TensorCore:
+            kernel_x.reorder_storage(k, x);
+            kernel_y.reorder_storage(k, y);
+
+            Var xii{"xii"}, yii{"yii"}, xio{"xio"};
+            resized_y.in()
+                .compute_root()
+                .align_bounds(x, 16)
+                .align_bounds(y, 16)
+                .tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)
+                .unroll(c)
+                .split(xi, xi, xii, 32)
+                .split(xi, xio, xi, 1)
+                .gpu_threads(xio)
+                .split(yi, yi, yii, 8)
+                .reorder(xii, yii, c, yi, xi, xio, x, y)
+                .vectorize(xii)
+                .vectorize(yii)
+                .unroll(yi)
                 .unroll(xi)
-                .unroll(yi);;
+                .gpu_blocks(x, y);
 
-            // resized_x
-            //     .compute_at(output, x)
-            //     .gpu_threads(x)
-            //     ;
-            // resized_y
-            //     .compute_at(output, yi)
-            //     .gpu_threads(x);
-            // output
-            //     .tile(x, y, xi, yi, 32, 32)
-            //     .gpu_blocks(y)
-            //     .gpu_blocks(c)
-            //     // .gpu_threads(yi)
-            //     .gpu_threads(xi)
-            //     ;
-        } else {
-
-            // -------------- resized_y --------------
-            as_float // indexed in resized_y by xo and ry.y
-                .compute_root()
-                .tile(x, y, xo, yo, x, y, 16 * 8, 2 * 2, TailStrategy::RoundUp)
-                .tile(x, y, xi, yi, 16, 2)
-                .fuse(xi, yi, z)
-                .gpu_threads(z)
-                .gpu_blocks(xo, yo, c)
-                .reorder(x, y, z, xo, yo, c);
-            if (!debug) as_float.unroll(x).unroll(y);
-
-            kernel_blocks_y // indexed in resized_y by yo and ry.y
-                .compute_at(resized_y, ry.y)
-                .fuse(xi, yi, z)
-                .split(z, zo, zi, 32)
-                // zi correspond to two 16-element contiguous vectors
-                .reorder(zo, zi)
-                .gpu_threads(zi);
-            if (!debug) kernel_blocks_y.unroll(zo);
-
-            resized_y
-                .in()
-                .compute_at(resized_yf16, x)
-                .reorder(xi, yi, xo, c, yo)
-                .vectorize(xi, 16)
-                .vectorize(yi, 16);
-            resized_y
-                .compute_at(resized_yf16, y)
-                .store_in(MemoryType::WMMAAccumulator);
-            resized_y
-                .vectorize(xi, 16)
-                .vectorize(yi, 16);
-            resized_y
+            resized_y.compute_at(resized_y.in(), xio)
+                .store_in(MemoryType::WMMAAccumulator)
+                .unroll(c)
+                .vectorize(x, 32)
+                .unroll(x)
+                .vectorize(y, 8)
+                .unroll(y)
                 .update()
-                // yo and ry.y determines the kernel_blocks to be loaded
-                .reorder(ry.x, xi, yi, xo, c, ry.y, yo)
                 .atomic()
-                .vectorize(ry.x)
-                .vectorize(xi)
-                .vectorize(yi);
-            if (!debug) resized_y.unroll(c).unroll(xo).unroll(yo);
-            if (!debug) resized_y.update().unroll(c).unroll(xo).unroll(yo);
+                .unroll(c)
+                .vectorize(x, 32)
+                .unroll(x)
+                .vectorize(y, 8)
+                .unroll(y)
+                .vectorize(r, 16)
+                .reorder(y, c, x, r);
 
-            resized_yf16 // indexed in resized_x by rx.y and yo
-                .compute_root()
-                .tile(xo, yo, x, y, 2, 1)
-                .fuse(xi, yi, z)
-                .split(z, zo, zi, 32)
-                // zi correspond to two 16-element contiguous vectors
-                .reorder(zo, zi, x, c, y, xo, yo)
-                .gpu_blocks(xo, yo)
-                .gpu_threads(zi);
-            if (!debug) resized_yf16.unroll(c).unroll(x).unroll(y).unroll(zo);
-
-            // -------------- resized_x --------------
-            kernel_blocks_x // indexed in resized_x by rx.y and xo
-                .compute_at(resized_x, rx.y)
-                .fuse(xi, yi, z)
-                .split(z, zo, zi, 32)
-                // zi correspond to two 16-element contiguous vectors
-                .reorder(zo, zi)
-                .gpu_threads(zi);
-            if (!debug) kernel_blocks_x.unroll(zo);
-
-            resized_x
-                .in()
-                .compute_at(output, y)
-                .reorder(xi, yi, yo, c, xo)
-                .vectorize(yi)
-                .vectorize(xi);
-            
-            resized_x
-                .compute_at(output, xo)
-                .store_in(MemoryType::WMMAAccumulator);
-            resized_x
-                .vectorize(yi, 16)
-                .vectorize(xi, 16);
-            resized_x
-                .update()
-                // xo and rx.y determines the kernel_blocks_x to load,
-                .reorder(rx.x, xi, yi, yo, c, rx.y, xo)
-                .atomic()
-                .vectorize(rx.x)
-                .vectorize(xi)
-                .vectorize(yi);
-            if (!debug) resized_x.unroll(c);
-            if (!debug) resized_x.update().unroll(c);
-
-            // -------------- output --------------
-            auto& output_specialized = output;
-            output_specialized
+            output
                 .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)
-                .tile(x, y, xo, yo, x, y, 1, 1)
-                .fuse(xi, yi, z)
-                .split(z, zo, zi, 32)
-                // zi correspond to two 16-element contiguous vectors
-                .reorder(zo, zi, y, c, x, xo, yo)
-                .gpu_threads(zi)
-                .gpu_blocks(yo, xo);
-            if (!debug) output_specialized.unroll(c).unroll(zo).unroll(x).unroll(y);
+                .reorder(yi, xi, x, y, c)
+                .gpu_blocks(x, y, c)
+                .split(yi, yi, yii, 2)
+                .fuse(xi, yii, z)
+                .gpu_lanes(z)
+                .unroll(yi);
+
+            resized_x.in()
+                .compute_at(output, x)
+                //.gpu_threads(c)
+                .vectorize(x)
+                .vectorize(y);
+
+            RVar ri, ro;
+            resized_x
+                .store_in(MemoryType::WMMAAccumulator)
+                .compute_at(resized_x.in(), c)
+                .vectorize(x)
+                .vectorize(y)
+                .update()
+                .atomic()
+                .split(r, ro, ri, 16)
+                .reorder(ri, x, y, ro)
+                .vectorize(x)
+                .vectorize(y)
+                .vectorize(ri);
+
+            // Need an extra layer of staging because we're not necessarily aligned in X
+            resized_y.in()
+                .in()
+                .compute_at(output, x)
+                .store_in(MemoryType::GPUShared)
+                .split(x, xo, xi, 32, TailStrategy::RoundUp)
+                .gpu_lanes(xi);
         }
 
-        output.dim(0).set_stride(1);
         output.dim(0).set_min(0);
         output.dim(1).set_min(0);
-        output.dim(2).set_min(0);
-        output.dim(2).set_extent(3);
-        input.dim(0).set_stride(1);
+        output.dim(2).set_bounds(0, 3);
         input.dim(0).set_min(0);
         input.dim(1).set_min(0);
-        input.dim(2).set_min(0);
-        input.dim(2).set_extent(3);
-
-        // with concrete numbers
-        if (debug) {
-            input.dim(0).set_extent(2048);
-            input.dim(1).set_extent(2048);
-            output.dim(0).set_extent(int(2048 * 0.1));
-            output.dim(1).set_extent(int(2048 * 0.1));
-            
-            output.print_loop_nest();
-        } else {
-            // output.dim(0).set_extent(cast<int>(input.dim(0).extent() * scale_factor));
-            // output.dim(1).set_extent(cast<int>(input.dim(1).extent() * scale_factor));
-        }
+        input.dim(2).set_bounds(0, 3);
     }
 };
 

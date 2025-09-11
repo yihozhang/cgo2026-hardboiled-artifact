@@ -10,322 +10,256 @@ class RecFilter : public Halide::Generator<RecFilter> {
 public:
     // Generator Params
     GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cuda_only", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
-    GeneratorParam<int> imgCol{"imgCol", 1024 * 1024};
-    GeneratorParam<int> order{"order", 2};
 
-    // Inputs
-    Input<Buffer<float16_t>> g{"g", 2}; // inputs
-    Input<Buffer<float>> a{"a", 1}; // coefficients
-    Output<Buffer<float>> f{"f"};
+    // Input: 2-channel float16 audio
+    Input<Buffer<float16_t>> g{"g", 2};
 
-    
-    int delay_factor;
-    int tile_width;
+    // Filter coefficients
+    Input<uint16_t> a1_bits{"a1_bits"}, a2_bits{"a2_bits"};
+
+    // Filter impulse response (precomputed because it doesn't depend on the input)
+    Input<Buffer<float16_t>> impulse{"impulse", 2};
+
+    // Output
+    Output<Buffer<float16_t>> output{"output", 2};
 
     void generate() {
-        if (gpu_schedule == Schedule::CUDA) {
-            tile_width = 1024;
-        } else {
-            delay_factor = 16;
-            tile_width = 4096;
+        // Tunable tiling factor. 1024 seems to be near optimal for both schedules.
+        int tile_width = 1024;
+
+        Expr a1 = reinterpret<float16_t>(a1_bits);
+        Expr a2 = reinterpret<float16_t>(a2_bits);
+
+        // This is a recursive filter. The recurrence relation is:
+        // output[x] = input[x] + a1 * output[x-1] + a2 * output[x-2]
+
+        // A naive implementation is serial. There are lots of ways to factor a
+        // recursive filter to extract some parallelism. Here's how to think
+        // about all of them:
+
+        // This whole thing is linear. No matter what tricks we play, everything
+        // we ever compute is going to be linearly predictable from some subset
+        // of the previously seen inputs and previously produced
+        // outputs. Because it's linear we can characterize it in terms of the
+        // response to standard basis vectors. i.e. how does the system evolve
+        // over time if a single input, or a single previous output is 1, and
+        // everything else is zero.
+
+        // If a single input is 1 and all other inputs and all previous outputs
+        // are zero, you get the impulse response of the filter starting at the
+        // 1. That's the definition of the impulse response.
+
+        // If the immediately previous output is 1, outputs before that are
+        // zero, and all inputs are zero, you also get the impulse response of
+        // the filter starting at the 1. This is because in our recurrence,
+        // there's no coefficient on the input.
+
+        // It's more complicated if the output from time t - 2 is 1, and the
+        // output at t-1 and all inputs are zero. If we just took the impulse
+        // response starting at the 1 (at t-2), then the output at t-1 would
+        // have been the coefficient a1, not zero. To make it zero for that
+        // output we need to subtract the impulse response centered at that next
+        // output scaled by a1. So the system applied to the basis vector which
+        // is [1 0] for the previous two outputs produces the impulse response
+        // convolved with [1 -a1]. These two impulse responses vary with the
+        // coefficients, not the input, so we precompute them once outside the
+        // kernel and accept them as an additional input buffer. Really Halide
+        // needs a .super_root() mechanism to lift compute outside of kernels
+        // entirely.
+
+        // With that out of the way, how are we actually parallelizing this
+        // apparently serial filter? We want outer-loop parallelism (tiles) and
+        // inner-loop parallelism (warp lanes). To get our outer loop
+        // parallelism over tiles, we use GPU-efficient Recursive Filtering by
+        // Hoppe et al. This turns a recursive filter into performing the filter
+        // within each tile in isolation, and then adding a correction factor
+        // using the end of the previous tile. If the filter decays slowly this
+        // correction factor still needs to be computed serially across the
+        // tiles, but it's O(1) work per tile.
+
+        // This gives you a good parallel axis for GPU blocks. You can map GPU
+        // threads to this too if you want, but it results in wraps doing large
+        // strided loads and not much parallelism in general. It's possible to
+        // do better. To get inner-loop parallelism we'll use
+        // scattered-lookahead interpolation (SLA) from "Pipeline interleaving
+        // and parallelism in recursive digital filters" by K K Parhi et
+        // al. This turns a dense IIR into an FIR filter followed by a strided
+        // IIR filter, allowing you to parallelize within one stride. A nice
+        // thing about SLA is that it also makes the filter more numerically
+        // stable.
+
+        Var m{"m"}, n{"n"}, mi{"mi"}, mo{"mo"}, o{"o"}, mii{"mii"};
+
+        // Stage 1: scan within each tile, pretending everything outside the
+        // tile is zero. This is parallel over tiles.
+
+        // Within that tile we'll use scattered lookahead interpolation, as
+        // described above. We need to precompute a small amount of stuff to do
+        // SLA, giving us our dense FIR and our strided IIR.
+
+        // Figure out the dilated convolution kernel in closed form on host
+        std::vector<Expr> kernel_ = {Expr(1.0f)};
+        Expr a1_ = cast<double>(a1), a2_ = cast<double>(a2);
+
+        int dilation = 1;
+        // The optimal amount of dilation could in principle vary per schedule,
+        // but it seems to be 8 for both.
+        int target_dilation = gpu_schedule == Schedule::CUDA ? 8 : 8;
+        while (dilation < target_dilation) {
+            auto convolve = [&](std::vector<Expr> &a, std::vector<Expr> b, int dilation) {
+                size_t b_dilated_size = (b.size() - 1) * dilation + 1;
+                std::vector<Expr> result(a.size() + b_dilated_size - 1);
+                for (size_t i = 0; i < result.size(); i++) {
+                    Expr e = 0.f;
+                    for (size_t k = 0; k < b.size(); k++) {
+                        ptrdiff_t j = i - dilation * k;
+                        if (j >= 0 && j < (ptrdiff_t)a.size()) {
+                            e += a[j] * b[k];
+                        }
+                    }
+                    result[i] = e;
+                }
+                return result;
+            };
+            kernel_ = convolve(kernel_, std::vector<Expr>{Expr(1.0), a1_, -a2_}, dilation);
+            a1_ = a1_ * a1_ + 2 * a2_;
+            a2_ = -a2_ * a2_;
+            dilation *= 2;
         }
-        /*---------------------------------*
-        |  Compute A and B                 |
-        *---------------------------------*/
-        a1(m, n) = cast<float>(0);
-        a1(0, 0) = cast<float>(1);
+        a1_ = cast<float16_t>(a1_);
+        a2_ = cast<float16_t>(a2_);
+        kernel_.push_back(0.f);
+        std::reverse(kernel_.begin(), kernel_.end());
 
-        // for (int o = 0; o < order; o++)
-        //     for (int i = 1; i <= delay_factor; i++)
-        //         for (int j = 1; j <= i; j++)
-        //             if (j + o <= order)
-        //                 a1(o, i) += a1(0, i - j) * cast<float>(a[j + o]);
-        RDom r_init(
-            1, tile_width,
-            1, tile_width,
-            0, order,
-            "r_init"
-        );
-        r_init.where(r_init.x <= r_init.y);
-        r_init.where(r_init.x + r_init.z <= order);
-        
-        a1(r_init.z, r_init.y) += a1(0, max(r_init.y - r_init.x, 0)) * cast<float>(a(clamp(r_init.x + r_init.z, 1, order)));
+        Func kernel{"kernel"};
+        kernel(mi) = cast<float16_t>(mux(mi, kernel_));
+        kernel.compute_root().unroll(mi);
+
+        // We are now ready to perform the FIR
+        Func g_tiled("g_tiled");
+        g_tiled(mi, mo, n) = g(mo * tile_width + mi, n);
+
+        Func g_padded("g_padded");
+        g_padded(mi, mo, n) = select(mi >= 0, likely(g_tiled(max(0, mi), mo, n)), cast<float16_t>(0.f));
+
+        Func g_convolved("g_convolved");
+        g_convolved(mi, mo, n) = 0.f;
+        RDom r_conv(0, dilation * 2);
+        g_convolved(mi, mo, n) += cast<float>(kernel(r_conv)) * g_padded(mi - 2 * dilation + 1 + r_conv, mo, n);
+
+        // Next we perform the strided/dilated IIR
+        Func fi_dilated{"fi_dilated"};
+        fi_dilated(mii, mi, mo, n) = undef<float>();
+        RDom r_intra{0, tile_width / dilation, "r_intra"};
+        fi_dilated(mii, r_intra, mo, n) =
+            (g_convolved(r_intra * dilation + mii, mo, n) +
+             select(r_intra > 0, a1_ * fi_dilated(mii, r_intra - 1, mo, n), 0.f) +
+             select(r_intra > 1, likely(a2_ * fi_dilated(mii, r_intra - 2, mo, n)), 0.f));
+
+        // Undo the sub-tiling
+        Func fi{"fi"};
+        fi(mi, mo, n) = fi_dilated(mi % dilation, mi / dilation, mo, n);
+
+        // Stage 2 of Hoppe et al.: A recursive scan across the last two values
+        // in each tile, to correct the fact that we were pretending values
+        // outside the tile were zero. This is serial, but it only touches the
+        // last two values in each tile, so it's not so bad.
+        Func fct{"fct"};
+        fct(o, m, n) = select(m < 0, 0.f, fi(tile_width - 2 + o, max(0, m), n));
+        RDom r_tail{0, 2, 0, output.width() / tile_width, "r_tail"};
+        // Doing this recursive sweep is a no-op if the filter decays entirely in
+        // the span of one tile, which most numerically-stable filters will, if
+        // the tiles are large. We skip it in that case.
+        r_tail.where(impulse(tile_width, 0) > 0);
+        fct(r_tail.x, r_tail.y, n) +=
+            (impulse(tile_width - 1 + r_tail.x, 1) * fct(0, r_tail.y - 1, n) +
+             impulse(tile_width - 1 + r_tail.x, 0) * fct(1, r_tail.y - 1, n));
+
+        // Stage 3: Finally, we correct the other values in each tile using the
+        // last two values of the previous tile.
+        Func f{"f"};
+        f(mi, mo, n) =
+            // Intra-tile contribution
+            cast<float16_t>(fi(mi, mo, n) +
+                            // Contribution from 2nd-last value in previous tile
+                            impulse(mi + 1, 1) * fct(0, mo - 1, n) +
+                            // Contribution from the last value in the previous tile
+                            impulse(mi + 1, 0) * fct(1, mo - 1, n));
+
+        // Untile the result
+        output(m, n) = f(m % tile_width, m / tile_width, n);
+
+        // Schedule
+        Var moo{"moo"}, moi{"moi"}, mio{"mio"}, z{"z"};
+        RVar ri{"ri"}, ro{"ro"}, rio{"rio"}, rii{"rii"};
+        fi_dilated.compute_root();
+        fi_dilated.update()
+            .gpu_blocks(mo, n)
+            .split(mo, moo, moi, std::max(1, 32 / dilation))
+            .fuse(mii, moi, z)
+            .gpu_threads(z)
+            // Halide really doesn't want to keep the last two outputs in
+            // registers across the loop back edge. It wants to reload after
+            // storing. We can approximate the correct behavior by just
+            // unrolling a lot.
+            .split(r_intra, ro, ri, 32)
+            .unroll(ri);
 
         if (gpu_schedule == Schedule::CUDA) {
-            // r = {
-            //     0, order,
-            //     1, tile_width - 1,
-            //     "r"
-            // };
-            // r.where(r.y - r.x - 1 >= 0);
-            // fi(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
-            // fi(r.y, mo, n) += a(r.x + 1) * fi(r.y - r.x - 1, mo, n);
-
-            r = {
-                0, tile_width,
-                1, tile_width - 1,
-                "r"
-            };
-            r.where(1 <= r.y - r.x && r.y - r.x <= order);
-            fi(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
-            fi(r.y, mo, n) += a(clamp(r.y - r.x, 1, order)) * fi(r.x, mo, n);
-
-            r_tail = {
-                0, order,
-                tile_width - order, order,
-                1, imgCol / tile_width - 1,
-                "r_tail",
-            };
-            fct(mi, mo, n) = fi(mi, mo, n);
-            fct(r_tail.y, r_tail.z, n) += a1(r_tail.x, r_tail.y + 1) * fct(tile_width - r_tail.x - 1, r_tail.z - 1, n);
-
-            // Mins, maxs, and clamps here are for bound inference
-            in_tile = {
-                0, order,
-                0, order,
-                "in_tile"
-            };
-            f(mi, mo, n) = cast<float>(g(mo * tile_width + mi, n));
-            f(in_tile.y, mo, n) += a(in_tile.x + 1) * 
-                select(in_tile.y > in_tile.x, 
-                    f(max(in_tile.y - in_tile.x - 1, 0), mo, n),                 
-                    select(mo > 0, fct(tile_width + min(in_tile.y - in_tile.x, 0) - 1, mo - 1, n), 0)
-                );
-            r2 = {
-                0, order,
-                order, tile_width - order,
-                "r2"
-            };
-            f(r2.y, mo, n) += a(r2.x + 1) * f(r2.y - r2.x - 1, mo, n);
-        } else {
-            wA = {0, delay_factor, 0, delay_factor, "wA"};
-            wB = {0, delay_factor, 0, order, "wB"};
-            A(m, n) = cast<float16_t>(0);
-            A(wA.x, wA.y) = select(wA.y <= wA.x, cast<float16_t>(a1(0, wA.x - wA.y)), cast<float16_t>(0));
-            B(n, m) = a1(m, n + 1);
-
-            /*---------------------------------*
-            | Computes the non-recursive part  |
-            *---------------------------------*/
-            g_delay(mii, mi, mo, n) = g((mo * delay_factor + mi) * delay_factor + mii, n);
-
-            w = {0, delay_factor, "w"};
-            h(mii, mi, mo, n) = cast<float>(0.f);
-            h(mii, mi, mo, n) += cast<float>(A(mii, w)) * cast<float>(g_delay(w, mi, mo, n));
-
-            /*---------------------------------*
-            | Computes the recursive part      |
-            *---------------------------------*/
-            f_initial(mii, m, n) = h(mii, m % delay_factor, m / delay_factor, n);
-
-            // First intra-tile
-            r = {0, order,
-                0, delay_factor,
-                // second arg is extent not upper bound
-                1, tile_width / delay_factor - 1,
-                "r"};
-            fi(mii, mi, mo, n) = f_initial(mii, mo * (tile_width / delay_factor) + mi, n);
-            fi(r.y, r.z, mo, n) += B(r.y, r.x) * fi(delay_factor - r.x - 1, r.z - 1, mo, n);
-
-            // Inter-tile
-            r_tail = {
-                0, order,
-                0, delay_factor,
-                1, imgCol / tile_width - 1,
-                "rt"
-            };
-            fct(mii, mo, n) = fi(mii, tile_width / delay_factor - 1, mo, n);
-            fct(r_tail.y, r_tail.z, n) += a1(r_tail.x, tile_width - delay_factor + r_tail.y + 1) * fct(delay_factor - r_tail.x - 1, r_tail.z - 1, n);
-
-            // Final intra-tile
-            in_tile = {
-                0, order,
-                "in_tile"
-            };
-            f(mii, mi, mo, n) = f_initial(mii, mo * (tile_width / delay_factor) + mi, n);
-            f(mii, 0, mo, n) += select(mo > 0, a1(in_tile.x, mii + 1) * fct(delay_factor - in_tile.x - 1, mo - 1, n), 0);
-            f(r.y, r.z, mo, n) += B(r.y, r.x) * f(delay_factor - r.x - 1, r.z - 1, mo, n);   
-        }
-        
-    }
-
-    void schedule() {
-        bool debug = false;
-        if (gpu_schedule == Schedule::CUDA) {
-            a1.bound(m, 0, order).bound(n, 0, tile_width + 1);
-            f.bound(n, 0, 2);
-            f.bound(mo, 0, imgCol / tile_width);
-            f.bound(mi, 0, tile_width);
-
-            a1.compute_root().unroll(m);
-            fi
-                .compute_root()
-                .split(mi, mi, mii, 32)
-                .gpu_blocks(mo, n)
-                .gpu_threads(mii)
-                .unroll(mi, 4);
-            fi
+            g_convolved
+                .compute_at(fi_dilated, ri)
                 .update()
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi)
-                ;
+                .unroll(r_conv);
 
-            fct
-                .compute_root()
-                .split(mi, mi, mii, 32)
-                .gpu_blocks(mo, n)
-                .gpu_threads(mii)
-                .unroll(mi);
-            fct
-                .update()
-                .atomic(true)
-                .gpu_blocks(n)
-                .gpu_threads(r_tail.y)
-                .unroll(r_tail.x);
-
-            f
-                .compute_root()
-                .split(mi, mi, mii, 32)
-                .gpu_blocks(mo, n)
-                .gpu_threads(mii)
-                .unroll(mi, 4);
-            f
-                .update(0)
-                .atomic(true)
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi)
-                .unroll(in_tile.x)
-                .unroll(in_tile.y)
-                ;
-            f
-                .update(1)
-                .atomic(true)
-                .split(mo, moo, moi, 32)
-                .gpu_blocks(moo, n)
-                .gpu_threads(moi)
-                // .unroll(r2.y, 8)
-                ;
         } else {
-            /*---------------------------------*
-            | Bounds                           |
-            *---------------------------------*/
-            A.bound(m, 0, delay_factor).bound(n, 0, delay_factor);
-            B.bound(m, 0, order).bound(n, 0, delay_factor);
-            f_initial.bound(mii, 0, delay_factor).bound(m, 0, imgCol / delay_factor)
-                .bound(n, 0, 2);  // stereo audio;
-            f.bound(n, 0, 2);
-            f.bound(mo, 0, imgCol / tile_width);
-            f.bound(mi, 0, tile_width / delay_factor);
-            f.bound(mii, 0, delay_factor);
+            fi_dilated.update().reorder(ri, ro, z);
 
-            /*---------------------------------*
-            |a1, A, B are small coeff matrices |
-            *---------------------------------*/
-            a1.compute_root().unroll(m);
-            A.compute_root();
-            B.compute_root();
+            g_convolved.in()
+                .compute_at(fi_dilated, moo)
+                .split(mi, mio, mii, 256)
+                .unroll(mio)
+                .vectorize(mii);
 
-            h
-                .compute_at(f_initial, moi)
+            // The dense FIR is going to use mma instructions. The FIR kernel
+            // will automatically be shuffled into Toeplitz form for us.
+            g_convolved.compute_at(g_convolved.in(), mo)
                 .store_in(MemoryType::WMMAAccumulator)
-                .reorder(mii, mi, mo, n)
-                .vectorize(mi)
-                .vectorize(mii)
+                .vectorize(mi, 256)
+                .unroll(mi)
+                .unroll(mo)
                 .update()
-                .reorder(w, mii, mi, mo, n)
+                .vectorize(mi, 256)
+                .unroll(mi)
+                .unroll(mo)
                 .atomic()
-                .vectorize(mi)
-                .vectorize(mii)
-                .vectorize(w);
+                .vectorize(r_conv, 8)
+                .unroll(r_conv);
 
-            f_initial
-                .compute_root()
-                .split(m, mo, mi, 16)
-                // computes (16 x 16) x 256 pixels in a block
-                .split(mo, moo, moi, 256)
-                .reorder(mii, mi, moi, moo, n)
-                .gpu_blocks(moo, n)
-                .vectorize(mi)
-                .vectorize(mii)
-                ;
-            if (!debug) f_initial.split(moi, mo, moi, 8).unroll(moi);
-
-            // TODO: split block into blocks of threads to increase occupancy
-            fi
-                .compute_root()
-                .reorder(mii, mi, n, mo)
-                .gpu_blocks(mo)
-                .gpu_threads(mii, n)
-                ;
-            if (!debug) fi.unroll(mi, 8);
-            fi
-                .update()
-                .atomic(true)
-                .fuse(r.y, n, ri)
-                .reorder(ri, r.z, mo)
-                .gpu_blocks(mo)
-                .gpu_threads(ri)
-                ;
-
-            fct
-                .compute_root()
-                .reorder(mii, n, mo)
-                .gpu_blocks(mo)
-                .gpu_threads(mii)
-                .gpu_threads(n);
-            fct
-                .update()
-                .atomic(true)
-                .gpu_blocks(n)
-                .gpu_threads(r_tail.y);
-
-            f
-                .compute_root()
-                .fuse(mii, n, mii)
-                .reorder(mii, mi, mo)
-                .gpu_threads(mii)
-                .gpu_blocks(mo)
-                ;
-            if (!debug) f.unroll(mi, 8);
-            f
-                .update(0)
-                .atomic(true)
-                .fuse(mii, n, mii)
-                .gpu_threads(mii)
-                .gpu_blocks(mo)
-                .unroll(in_tile.x);
-            f
-                .update(1)
-                .atomic(true)
-                .fuse(r.y, n, ri)
-                .gpu_threads(ri)
-                .gpu_blocks(mo)
-                .unroll(r.z, 8)
-                ;
+            g_padded.compute_at(g_convolved, mo)
+                .vectorize(mi, 4)
+                .split(mi, mio, mii, 32)
+                .gpu_lanes(mii)
+                .unroll(mio);
         }
+
+        fct.compute_root()
+            .gpu_tile(m, mo, mi, 32)
+            .gpu_blocks(n)
+            .vectorize(o);
+
+        fct.update(0)
+            .gpu_blocks(n)
+            .unroll(r_tail.x)
+            .unroll(r_tail.y, 4);
+
+        output.compute_root()
+            .gpu_tile(m, mo, mi, 128, TailStrategy::RoundUp)
+            .vectorize(mi, 4)
+            .gpu_blocks(n);
+
+        // Simplify some indexing
+        output.dim(0).set_bounds(0, (output.dim(0).extent() >> 16) << 16);
     }
-
-private:
-    Var x{"x"}, y{"y"}, n{"n"}, m{"m"}, mo{"mo"}, mi{"mi"}, mii{"mii"};
-    Var moo{"moo"}, moi{"moi"};
-    RVar ro{"ro"}, ri{"ri"};
-
-    Func a1{"a1"};
-    Func A{"A"}, B{"B"};
-
-    Func f_delay{"f_delay"}, f_initial{"f_initial"};
-    Func g_delay{"g_delay"};
-    Func h{"h"};
-    Func fi{"fi"}, ft{"ft"}, fct{"fct"};
-
-    RDom wA, wB;
-    RDom w;
-    RDom r;
-    RDom r0, r2;
-    RDom r_tail;
-    RDom in_tile;
 };
 
 HALIDE_REGISTER_GENERATOR(RecFilter, rec_filter)

@@ -45,9 +45,6 @@ class CountGPUBlocksThreads : public IRVisitor {
         int dl = op->for_type == ForType::GPULane;
         int dt = op->for_type == ForType::GPUThread;
 
-        // The threads counter includes lanes loops
-        dt += dl;
-
         // Increment counters
         nb += db;
         nl += dl;
@@ -72,12 +69,9 @@ class CountGPUBlocksThreads : public IRVisitor {
         int dl = op->memory_type == MemoryType::WMMAAccumulator;
 
         nl += dl;
-        nt += dl;
-        nthreads = std::max(nt, nthreads);
         nlanes = std::max(nl, nlanes);
         IRVisitor::visit(op);
         nl -= dl;
-        nt -= dl;
     }
 
 public:
@@ -132,7 +126,7 @@ class CanonicalizeGPUVars : public IRMutator {
                 name += gpu_block_name(counter.nblocks);
                 debug(5) << "Replacing " << op->name << " with GPU block name " << name << "\n";
             } else if (op->for_type == ForType::GPUThread) {
-                name += gpu_thread_name(counter.nthreads);
+                name += gpu_thread_name(counter.nthreads + counter.nlanes);
                 debug(5) << "Replacing " << op->name << " with GPU thread name " << name << "\n";
             } else if (op->for_type == ForType::GPULane) {
                 name += gpu_thread_name(0);

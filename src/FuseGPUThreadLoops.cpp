@@ -198,7 +198,7 @@ class ReplaceForWithIf : public IRMutator {
                 }
             }
 
-            internal_assert(dim >= 0 && dim < block_size.threads_dimensions());
+            internal_assert(dim >= 0 && dim < block_size.threads_dimensions()) << op->name << " " << block_size.threads_dimensions() << "\n";
 
             Stmt body = mutate(op->body);
 
@@ -463,6 +463,7 @@ private:
              op->memory_type != MemoryType::Heap &&
              op->memory_type != MemoryType::GPUShared &&
              op->memory_type != MemoryType::GPUTexture) ||
+            op->memory_type == MemoryType::WMMAAccumulator ||
             op->memory_type == MemoryType::Register ||
             op->memory_type == MemoryType::Stack) {
             // These allocations go in register or local memory
@@ -923,18 +924,22 @@ public:
                         map<string, pair<int, int>> intrinsics_with_handle_args = {
                             {"wmma.load.a.sync.aligned.row.m16n16k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m16n16k16.f16", {0, 1}},
+                            {"wmma.load.b.sync.aligned.col.m16n16k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m16n16k16.f32", {0, 1}},
                             {"wmma.store.d.sync.aligned.row.m16n16k16.f32", {0, 2}},
+                            {"wmma.store.d.sync.aligned.row.m16n16k16.f16", {0, 2}},
 
                             {"wmma.load.a.sync.aligned.row.m32n8k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m32n8k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m32n8k16.f32", {0, 2}},
                             {"wmma.store.d.sync.aligned.row.m32n8k16.f32", {0, 2}},
-                            
+                            {"wmma.store.d.sync.aligned.row.m32n8k16.f16", {0, 2}},
+
                             {"wmma.load.a.sync.aligned.row.m8n32k16.f16", {0, 1}},
                             {"wmma.load.b.sync.aligned.row.m8n32k16.f16", {0, 1}},
                             {"wmma.load.c.sync.aligned.row.m8n32k16.f32", {0, 2}},
                             {"wmma.store.d.sync.aligned.row.m8n32k16.f32", {0, 2}},
+                            {"wmma.store.d.sync.aligned.row.m8n32k16.f16", {0, 2}},
                         };
 
                         using IRMutator::visit;
