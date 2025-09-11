@@ -78,7 +78,7 @@ public:
         // tiles, but it's O(1) work per tile.
 
         // This gives you a good parallel axis for GPU blocks. You can map GPU
-        // threads to this too if you want, but it results in wraps doing large
+        // threads to this too if you want, but it results in warps doing large
         // strided loads and not much parallelism in general. It's possible to
         // do better. To get inner-loop parallelism we'll use
         // scattered-lookahead interpolation (SLA) from "Pipeline interleaving
