@@ -195,6 +195,9 @@ public:
         kernel_sum_x(x) += unnormalized_kernel_x(x, r);
         kernel_sum_y(y) += unnormalized_kernel_y(y, r);
 
+        kernel_x(x, k) = cast<float16_t>(unnormalized_kernel_x(x, k) / kernel_sum_x(x));
+        kernel_y(y, k) = cast<float16_t>(unnormalized_kernel_y(y, k) / kernel_sum_y(y));
+
         resized_y(x, y, c) += kernel_y(y, r) * as_float(x, r + beginy, c);
 
         resized_x(x, y, c) += kernel_x(x, r) * resized_y(r + beginx, y, c);
