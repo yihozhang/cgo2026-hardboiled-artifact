@@ -1,4 +1,3 @@
-#include "HalideBuffer.h"
 #include "halide_benchmark.h"
                                                                       
 #include <iostream>
@@ -24,8 +23,7 @@ inline void check_cublas(cublasStatus_t status, const char* msg = "", const char
         std::exit(EXIT_FAILURE);
     }
 }
-                                                                      
-using namespace Halide::Runtime;                                      
+                                                                                             
 using namespace Halide::Tools; 
 
 cublasHandle_t handle;
@@ -42,32 +40,6 @@ cublasLtMatmulPreference_t preference;
 
 void* workspace = nullptr;
 size_t workspace_size = 1 << 24; // 16 MB
-
-void matmul_cublas(const half* h_A, const half* h_B, float* h_C, int M, int N, int K) {
-    // Allocate device memory
-    //check_cuda(cudaMalloc(&d_A, M * K * sizeof(half)), "allocating d_A");
-    //check_cuda(cudaMalloc(&d_B, K * N * sizeof(half)), "allocating d_B");
-    //check_cuda(cudaMalloc(&d_C, M * N * sizeof(float)), "allocating d_C");
-
-    //check_cuda(cudaMemcpy(d_A, h_A, M * K * sizeof(half), cudaMemcpyHostToDevice), "copying h_A");
-    //check_cuda(cudaMemcpy(d_B, h_B, K * N * sizeof(half), cudaMemcpyHostToDevice), "copying h_B");
-
-    float alpha = 1.0f;
-    float beta = 0.0f;
-
-    check_cublas(cublasGemmEx(
-        handle,
-        CUBLAS_OP_N,
-        CUBLAS_OP_N,
-        N, M, K,
-        &alpha,
-        d_B, CUDA_R_16F, N,
-        d_A, CUDA_R_16F, K,
-        &beta,
-        d_C, CUDA_R_32F, N,
-        CUBLAS_COMPUTE_32F_FAST_16F,
-        CUBLAS_GEMM_ALGO4), "running cublasGemmEx");
-}
 
 void matmul_cublasLt(const half* h_A, const half* h_B, float* h_C, int M, int N, int K) {
     float alpha = 1.0f;
@@ -169,8 +141,7 @@ int main(int argc, char **argv) {
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {   
-        //matmul_cublasLt(h_A, h_B, h_C, M, N, K);
-        matmul_cublas(h_A, h_B, h_C, M, N, K);
+        matmul_cublasLt(h_A, h_B, h_C, M, N, K);
         check_cuda(cudaDeviceSynchronize(), "sync after matmul_cublas");
     });
 

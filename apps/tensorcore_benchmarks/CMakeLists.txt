@@ -36,6 +36,10 @@ set(VERIFY_OUTPUT false CACHE STRING "Verify output was correct (true or false);
 # Find Halide
 find_package(Halide REQUIRED)
 
+# FInd Pytorch
+set(CMAKE_PREFIX_PATH "/opt/libtorch")
+find_package(Torch REQUIRED)
+
 # Include helper functions
 include(cmake/TensorCoreHelpers.cmake)
 
@@ -241,11 +245,25 @@ target_link_libraries(attention
 
 # Baselines 
 add_executable(matmul_cublas baselines/matmul_baseline.cpp)
+add_executable(conv_layer_pytorch baselines/conv_layer_pytorch.cpp)
+add_executable(attention_pytorch baselines/attention_pytorch.cpp)
 
 target_link_libraries(matmul_cublas
     PRIVATE
     ${CUDA_LIBRARIES}
     ${CUBLAS_LIBRARIES}
+    Halide::Tools
+)
+
+target_link_libraries(conv_layer_pytorch
+    PRIVATE
+    "${TORCH_LIBRARIES}"
+    Halide::Tools
+)
+
+target_link_libraries(attention_pytorch
+    PRIVATE
+    "${TORCH_LIBRARIES}"
     Halide::Tools
 )
 
@@ -258,3 +276,5 @@ target_compile_definitions(matmul_cublas
 )
 
 target_include_directories(matmul_cublas PRIVATE ${CUDA_INCLUDE_DIRS})
+target_compile_definitions(conv_layer_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+target_compile_definitions(attention_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)

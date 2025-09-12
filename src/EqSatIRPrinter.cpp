@@ -93,7 +93,23 @@ void EqSatIRPrinter::visit(const UIntImm *e) {
 }
 
 void EqSatIRPrinter::visit(const FloatImm *e) {
-    auto value = std::to_string(e->value).find('.') != std::string::npos ? std::to_string(e->value) : std::to_string(e->value) + ".0";
+    float v = e->value;
+    std::string value;
+
+    if (std::isnan(v)) {
+        value = "nan";
+    } else if (std::isinf(v)) {
+        value = (v > 0) ? "inf" : "-inf";
+    } else {
+        value = std::to_string(v);
+        // Ensure it has a decimal point (for integers)
+        if (value.find('.') == std::string::npos &&
+            value.find('e') == std::string::npos &&
+            value.find('E') == std::string::npos) {
+            value += ".0";
+        }
+    }
+
     printArgs(stream, "FloatImm", e->type.bits(), value);
 }
 

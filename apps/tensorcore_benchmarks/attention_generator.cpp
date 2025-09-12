@@ -83,49 +83,86 @@ public:
         value.dim(1).set_bounds(0, _L).set_stride(_D);
         value.dim(2).set_bounds(0, _N).set_stride(_D * _L);
 
-        Var di, li, ki, qi;
-        Var mmdi, mmli, mmki, mmqi;
-        RVar rri, rro, rroo;
+        Var di{"di"}, li{"li"}, ki{"ki"}, qi{"qi"}, rr{"rr"};
+        Var mmdi{"mmdi"}, mmli{"mmli"}, mmki{"mmki"}, mmqi{"mmqi"};
+        RVar rri{"rri"}, rro{"rro"}, rroo{"rroo"};
         int mm_tile = 16;
 
+        // Schedule output
         output.split(d, d, di, mm_tile * 1)
             .split(di, di, mmdi, mm_tile)
             .split(l, l, li, mm_tile * 1)
             .split(li, li, mmli, mm_tile)
             .gpu_blocks(d, l, n)
             .reorder({mmdi, mmli, di, li, d, l, n})
-            .unroll(di)
-            .unroll(li)
+            //.unroll(di)
+            //.unroll(li)
             .vectorize(mmdi)
             .vectorize(mmli);
 
+        // Schedule weighted sum
         weighted_sum.compute_at(output, d)
             .store_in(MemoryType::WMMAAccumulator)
             .split(l, l, li, mm_tile)
             .split(d, d, di, mm_tile)
             .vectorize(di)
             .vectorize(li)
-            .unroll(d)
-            .unroll(l);
+            //.unroll(d)
+            //.unroll(l)
+            ;
 
         weighted_sum.update()
             .split(l, l, mmli, mm_tile)
             .split(d, d, mmdi, mm_tile)
             .split(rk, rro, rri, mm_tile)
             .reorder({rri, mmdi, mmli, rro, d, l})
-            .unroll(rro)
-            .unroll(l)
-            .unroll(d)
+            .unroll(rro, 8)
+            //.unroll(l)
+            //.unroll(d)
             .atomic()
             .vectorize(rri)
             .vectorize(mmli)
             .vectorize(mmdi);
 
-        row_max.compute_at(weighted_sum, d);
-        row_sum.compute_at(weighted_sum, d);
-        prob.compute_at(weighted_sum, d);
+        // Schedule row max
+        row_max.compute_at(prob, q)
+            .store_at(prob, q)
+            .update()
+            .split(rk, rro, rri, 4);
+        
+        Func row_max_im0 = row_max.update().rfactor(rro, rr);
+        row_max_im0.compute_at(prob, q).gpu_threads(rr).update().gpu_threads(rr);
 
+        int reduction_layers = 5;
+        for (int l=0; l<reduction_layers; l++) {
+            Func row_max_partial = row_max.update().split(rro, rro, rri, 2).rfactor(rro, rr);
+            row_max_partial.compute_at(prob, q).gpu_threads(rr).update().gpu_threads(rr);
+        }
+
+        // Schedule row sum
+        row_sum.compute_at(prob, q)
+            .store_at(prob, q)
+            .update()
+            .split(rk, rro, rri, 4);
+
+        Func row_sum_im0 = row_sum.update().rfactor(rro, rr);
+        row_sum_im0.compute_at(prob, q).gpu_threads(rr).update().gpu_threads(rr);
+        
+        for (int l=0; l<reduction_layers; l++) {
+            Func row_sum_partial = row_sum.update().split(rro, rro, rri, 2).rfactor(rro, rr);
+            row_sum_partial.compute_at(prob, q).gpu_threads(rr).update().gpu_threads(rr);
+        }
+
+        // Schedule prob
+        prob.compute_root()
+            .store_in(MemoryType::Heap)
+            .split(k, k, ki, 4)
+            .gpu_blocks(q, n)
+            .gpu_threads(k);
+
+        // Schedule scaled scores
         scaled_scores.compute_root()
+            .store_in(MemoryType::Heap)
             .split(q, q, qi, mm_tile * 1)
             .split(qi, qi, mmqi, mm_tile)
             .split(k, k, ki, mm_tile * 1)
@@ -138,7 +175,6 @@ public:
             .vectorize(mmqi)
             ;
 
-        // initialization
         scores.compute_at(scaled_scores, k)
             .store_in(MemoryType::WMMAAccumulator)
             .split(q, q, qi, mm_tile)
@@ -153,7 +189,7 @@ public:
             .split(k, k, mmki, mm_tile)
             .split(rd, rro, rri, mm_tile)
             .reorder({rri, mmki, mmqi, rro, k, q})
-            .unroll(rro)
+            .unroll(rro, 16)
             .unroll(q)
             .unroll(k)
             .atomic()
