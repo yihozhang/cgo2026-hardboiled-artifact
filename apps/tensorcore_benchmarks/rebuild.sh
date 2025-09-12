@@ -5,7 +5,7 @@ set -x
 # Default values
 BENCHMARK="conv1d"
 TARGET="win"
-SCHEDULE="cuda_only"
+SCHEDULE="cudaonly"
 CONV_KERNEL_SIZE="128"
 CONV_IMG_COL="3840"
 CONV_IMG_ROW="2160"
@@ -29,7 +29,7 @@ show_help() {
     echo "Options:"
     echo "  -b,         --benchmark NAME            Benchmark to build (conv1d, conv2d, upsample, downsample, matmul, conv_layer, attention) [default: conv1d]"
     echo "  -t,         --target TARGET             Target architecture (host, win, or linux) [default: host]"
-    echo "  -s,         --schedule SCHEDULE         Schedule to use (cuda_only or tensorcore) [default: cuda_only]"
+    echo "  -s,         --schedule SCHEDULE         Schedule to use (cudaonly or tensorcore) [default: cudaonly]"
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
     echo "  -conv_col,  --img-cols IMG_COL          Image width (3840) [default: 3840]"
     echo "  -conv_row,  --img-rows IMG_ROW          Image height (2160) [default: 2160]"

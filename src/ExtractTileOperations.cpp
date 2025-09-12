@@ -1118,7 +1118,7 @@ struct SubstStores : public EqSatIRMutator {
             for (size_t j = 0; j < unique_pending_definitions.size(); j++) {
                 // If they are exactly equal, we can replace the first with the second
                 if (equal(pending_definitions[i].expr, unique_pending_definitions[j].expr)) {
-                    debug(0) << "Found equals: " << pending_definitions[i].name << " and " << unique_pending_definitions[j].name << "\n";
+                    debug(0) << "Found equals: " << pending_definitions[i].name << " and " << unique_pending_definitions[j].name << ": " << pending_definitions[i].expr << "\n";
                     SubstKernelLoads subst_kernel_loads(pending_definitions[i].name, unique_pending_definitions[j].name, 0);
                     out = subst_kernel_loads.mutate(out);
                     unique = false;
