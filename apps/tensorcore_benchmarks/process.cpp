@@ -390,13 +390,36 @@ int main(int argc, char **argv) {
     // Verify results
     if (std::getenv("VERIFY_OUTPUT")) {
         bool success = true;
-        for (int y = 0; y < 256; y++) {
-            if (!success) {
-                break;
-            }
-            // todo later
-        }
+        for (int n = 0; n < N; n++) {
+            if (!success) break;
+            for (int h = 0; h < H; h++) {
+                if (!success) break;
+                for (int w = 0; w < W; w++) {
+                    if (!success) break;
+                    for (int c = 0; c < C; c++) {
+                        if (!success) break;
 
+                        float expected = bias(c);
+                        for (int ci = 0; ci < C; ci++) {
+                            for (int kx = 0; kx < kSize; kx++) {
+                                for (int ky = 0; ky < kSize; ky++) {
+                                    expected += float(filter(c, kx, ky, ci)) * float(input(ci, w + kx, h + ky, n));
+                                }
+                            }
+                        }
+                        expected = std::max(0.0f, expected);
+
+                        if (fabs(expected - output(c, w, h, n)) > 0.001f) {
+                            std::cerr << "Error at (" << c << ", " << w << ", " << w << ", " << n << "): "
+                                    << std::fixed << std::setprecision(10)
+                                    << output(c, w, h, n) << " != " << expected << "\n";
+                            success = false;
+                        }
+                    }
+                }
+            }
+        }
+        
         if (success) {
             std::cout << "Outputs match!\n";
             return 0;
