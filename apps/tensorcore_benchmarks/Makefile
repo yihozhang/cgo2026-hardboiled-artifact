@@ -29,7 +29,7 @@ $(BIN)/%/conv1d.a: $(GENERATOR_BIN)/conv1d.generator
 	$(eval HAS_UNDERSCORE := $(findstring _, $(SCHEDULE_KERNEL)))
 	$(eval SCHEDULE := $(if $(HAS_UNDERSCORE),$(firstword $(subst _, ,$(SCHEDULE_KERNEL))),$(SCHEDULE_KERNEL)))
 	$(eval KERNEL_SIZE := $(if $(HAS_UNDERSCORE),$(lastword $(subst _, ,$(SCHEDULE_KERNEL))),16))
-	$< -g conv1d -e $(GENERATOR_OUTPUTS) -o $(@D) -f conv1d target=$(HL_TARGET) gpu_schedule=$(SCHEDULE) kSize=$(KERNEL_SIZE)
+	$< -g conv1d -e $(GENERATOR_OUTPUTS),conceptual_stmt_html -o $(@D) -f conv1d target=$(HL_TARGET) gpu_schedule=$(SCHEDULE) kSize=$(KERNEL_SIZE)
 
 $(GENERATOR_BIN)/conv2d.generator: conv2d_generator.cpp $(GENERATOR_DEPS)
 	@mkdir -p $(@D)
