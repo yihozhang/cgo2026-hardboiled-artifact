@@ -11,7 +11,7 @@ public:
     GeneratorParam<Schedule> gpu_schedule{
         "gpu_schedule", Schedule::CUDA,         //
         {                                       //
-         {"cuda_only", Schedule::CUDA},         //
+         {"cudaonly", Schedule::CUDA},          //
          {"tensorcore", Schedule::TensorCore}}  //
     };
 
@@ -123,8 +123,8 @@ public:
             const int wmmaTileX = 256;
             const int wmmaTileY = 1;
 
-            const int reductionTileX = kSize;
-            const int reductionTileY = 4;
+            const int reductionTileX = 16;
+            const int reductionTileY = 1;
 
             /*---------------------------------*
             |  Vars / RVars                   |
@@ -165,7 +165,6 @@ public:
                 .vectorize(rkxi)
                 .unroll(rkyi)
                 .unroll(rkxo)
-                .unroll(rkyo)
                 .unroll(mmx)
                 .unroll(mmy);
         }

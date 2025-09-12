@@ -5,7 +5,7 @@ import re
 from pprint import pprint
 from collections import defaultdict
 
-schedules = ["cuda_only", "tensorcore"]
+schedules = ["cudaonly", "tensorcore"]
 
 # Define each benchmark as a dictionary with command-line flag names
 benchmarks = [
@@ -140,9 +140,9 @@ def compute_speedups(results):
 
     # Compute speedups
     speedups = []
-    for (benchmark, ksize, input_size), runtimes in configs.items():
-        if 'cuda_only' in runtimes and 'tensorcore' in runtimes:
-            cuda_time = runtimes['cuda_only']
+    for (benchmark, ksize, width, height), runtimes in configs.items():
+        if 'cudaonly' in runtimes and 'tensorcore' in runtimes:
+            cuda_time = runtimes['cudaonly']
             tensor_time = runtimes['tensorcore']
             speedup = cuda_time / tensor_time
             speedups.append({
@@ -251,7 +251,7 @@ def main():
             
             # If we have both schedules for this config, calculate and write speedup
             if len(config_results[key]) == 2:
-                cuda_time = config_results[key]['cuda_only']
+                cuda_time = config_results[key]['cudaonly']
                 tensor_time = config_results[key]['tensorcore']
                 speedup = cuda_time / tensor_time
 

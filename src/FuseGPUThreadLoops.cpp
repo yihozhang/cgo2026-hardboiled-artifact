@@ -463,6 +463,7 @@ private:
              op->memory_type != MemoryType::Heap &&
              op->memory_type != MemoryType::GPUShared &&
              op->memory_type != MemoryType::GPUTexture) ||
+            op->memory_type == MemoryType::WMMAAccumulator ||
             op->memory_type == MemoryType::Register ||
             op->memory_type == MemoryType::Stack) {
             // These allocations go in register or local memory

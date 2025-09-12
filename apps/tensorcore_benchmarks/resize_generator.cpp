@@ -71,7 +71,7 @@ public:
     GeneratorParam<Schedule> gpu_schedule{
         "gpu_schedule", Schedule::CUDA,         //
         {                                       //
-         {"cuda_only", Schedule::CUDA},         //
+         {"cudaonly", Schedule::CUDA},         //
          {"tensorcore", Schedule::TensorCore}}  //
     };
 
@@ -248,8 +248,8 @@ public:
                 .align_bounds(y, 16)
                 .reorder(c, x, y)
                 .unroll(c)
-                .gpu_tile(x, y, xi, yi, 64, 32, TailStrategy::RoundUp)  // TODO: Try 128x4
-                .tile(xi, yi, xii, yii, 4, 4)
+                .gpu_tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)  // TODO: Try 128x4
+                .tile(xi, yi, xii, yii, 2, 4)
                 .unroll(xii)
                 .unroll(yii);
             resized_y
@@ -290,10 +290,10 @@ public:
             kernel_x.in().compute_at(resized_x, r).vectorize(x).vectorize(k);
             break;
         case Schedule::TensorCore:
-            // kernel_x.reorder_storage(k, x);
+            kernel_x.reorder_storage(k, x);
             kernel_y.reorder_storage(k, y);
 
-            Var xii{"xii"}, yii{"yii"};
+            Var xii{"xii"}, yii{"yii"}, xio{"xio"};
             resized_y.in()
                 .compute_root()
                 .align_bounds(x, 16)
@@ -301,28 +301,32 @@ public:
                 .tile(x, y, xi, yi, 32, 16, TailStrategy::RoundUp)
                 .unroll(c)
                 .split(xi, xi, xii, 32)
+                .split(xi, xio, xi, 1)
+                .gpu_threads(xio)
                 .split(yi, yi, yii, 8)
-                .reorder(xii, yii, c, yi, xi, x, y)
+                .reorder(xii, yii, c, yi, xi, xio, x, y)
                 .vectorize(xii)
                 .vectorize(yii)
                 .unroll(yi)
-                .gpu_threads(xi)
+                .unroll(xi)
                 .gpu_blocks(x, y);
 
-            resized_y.compute_at(resized_y.in(), xi)
+            resized_y.compute_at(resized_y.in(), xio)
                 .store_in(MemoryType::WMMAAccumulator)
                 .unroll(c)
-                .vectorize(x)
+                .vectorize(x, 32)
+                .unroll(x)
                 .vectorize(y, 8)
                 .unroll(y)
                 .update()
                 .atomic()
                 .unroll(c)
-                .vectorize(x)
+                .vectorize(x, 32)
+                .unroll(x)
                 .vectorize(y, 8)
                 .unroll(y)
                 .vectorize(r, 16)
-                .reorder(c, r);
+                .reorder(y, c, x, r);
 
             output
                 .tile(x, y, xi, yi, 16, 16, TailStrategy::RoundUp)

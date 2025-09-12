@@ -8,19 +8,14 @@ using namespace Halide;
 class Convolution1D : public Halide::Generator<Convolution1D> {
 public:
     // Generator Params
-    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {
-        {"cuda_only", Schedule::CUDA},
-        {"tensorcore", Schedule::TensorCore}
-    }};
+    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cudaonly", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
 
     GeneratorParam<int> kSize{"kSize", 128};
-    GeneratorParam<int> imgRow{"imgRow", 4096};
-    GeneratorParam<int> imgCol{"imgCol", 4096};
 
     // Inputs
     Input<Buffer<float16_t>> kernel{"kernel", 1};
     Input<Buffer<float16_t>> image{"image", 2};
-    
+
     // Output
     Output<Buffer<float>> output{"output", 2};
 
@@ -29,7 +24,7 @@ public:
 
         conv(x, y) = cast<float>(0);
         conv(x, y) += cast<float>(kernel(rk.x)) * cast<float>(image(x + rk.x, y));
-        
+
         output(x, y) = conv(x, y);
     }
 
@@ -50,21 +45,20 @@ public:
             Var by("by"), ty("ty"), tyi("tyi");
             Var bx("bx"), tx("tx"), txi("txi");
             RVar rkxo("rkxo"), rkxi("rkxi");
-            
 
             /*------------------------------------------------------------------*
             |  1.  Scheduling the kernel that computes the output. Define GPU   |
             |      blocks and thread tiling.                                    |
             *------------------------------------------------------------------*/
             output.split(y, by, ty, blockTileY)
-                  .split(x, bx, tx, blockTileX)
-                  .split(ty, ty, tyi, threadTileY)
-                  .split(tx, tx, txi, threadTileX)
-                  .reorder({txi, tyi, tx, ty, bx, by})
-                  .gpu_blocks(bx, by)
-                  .gpu_threads(tx, ty)
-                  .unroll(txi)
-                  .unroll(tyi);
+                .split(x, bx, tx, blockTileX)
+                .split(ty, ty, tyi, threadTileY)
+                .split(tx, tx, txi, threadTileX)
+                .reorder({txi, tyi, tx, ty, bx, by})
+                .gpu_blocks(bx, by)
+                .gpu_threads(tx, ty)
+                .unroll(txi)
+                .unroll(tyi);
 
             /*------------------------------------------------------------------*
             |  2.  Scheduling the pure definition of conv                      |
@@ -89,19 +83,20 @@ public:
                 .vectorize(txi)
                 .vectorize(tyi)
                 .atomic();
-            
-        }
-        else if (gpu_schedule == Schedule::TensorCore) {
+
+        } else if (gpu_schedule == Schedule::TensorCore) {
             /*---------------------------------*
             |  Tunables                       |
             *---------------------------------*/
             const int blockTileX = 256;
             const int blockTileY = 16;
 
-            // We compute 256 contiguous elements 
+            // We compute 256 contiguous elements
             // as a 32x8 matrix
             const int wmmaTileX = 256;
             const int wmmaTileY = 1;
+
+            const int unrollY = 2;
 
             const int reductionTileX = 8;
 
@@ -110,22 +105,27 @@ public:
             *---------------------------------*/
             Var by("by"), mmy("mmy"), mmyi("mmyi");
             Var bx("bx"), mmx("mmx"), mmxi("mmxi");
+            Var bxi("bxi"), byi("byi");
             RVar rkxo("rkxo"), rkxi("rkxi");
 
             output.split(y, by, mmy, blockTileY)
-                  .split(x, bx, mmx, blockTileX)
-                  .gpu_blocks(bx, by)
-                  .split(mmy, mmy, mmyi, wmmaTileY)
-                  .split(mmx, mmx, mmxi, wmmaTileX)
-                  .reorder({mmxi, mmyi, mmx, mmy, bx, by})
-                  .vectorize(mmxi)
-                  .vectorize(mmyi);
+                .split(x, bx, mmx, blockTileX)
+                .gpu_blocks(bx, by)
+                .split(mmy, mmy, mmyi, wmmaTileY * unrollY)
+                .split(mmx, mmx, mmxi, wmmaTileX)
+                .reorder({mmxi, mmyi, mmx, mmy, bx, by})
+                .vectorize(mmxi, wmmaTileX)
+                .vectorize(mmyi, wmmaTileY)
+                .unroll(mmyi)
+                .unroll(mmxi);
 
             conv.compute_at(output, mmx)
                 .store_in(MemoryType::WMMAAccumulator)
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
                 .reorder({mmxi, mmyi, mmx, mmy})
+                .unroll(mmx)
+                .unroll(mmy)
                 .vectorize(mmxi)
                 .vectorize(mmyi);
 
@@ -133,7 +133,9 @@ public:
                 .split(y, mmy, mmyi, wmmaTileY)
                 .split(x, mmx, mmxi, wmmaTileX)
                 .split(rk.x, rkxo, rkxi, reductionTileX)
-                .reorder({rkxi, mmxi, mmyi, rkxo, mmx, mmy})
+                .reorder({rkxi, mmxi, mmyi, mmx, mmy, rkxo})
+                .unroll(mmx)
+                .unroll(mmy)
                 .atomic()
                 .vectorize(mmxi)
                 .vectorize(mmyi)

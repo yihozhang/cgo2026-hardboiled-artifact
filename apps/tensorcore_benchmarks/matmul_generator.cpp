@@ -8,7 +8,7 @@ using namespace Halide;
 class MatMul : public Halide::Generator<MatMul> {
 public:
     // Generator Params
-    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cuda_only", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
+    GeneratorParam<Schedule> gpu_schedule{"gpu_schedule", Schedule::CUDA, {{"cudaonly", Schedule::CUDA}, {"tensorcore", Schedule::TensorCore}}};
 
     GeneratorParam<int> M{"M", 1024};
     GeneratorParam<int> N{"N", 1024};
