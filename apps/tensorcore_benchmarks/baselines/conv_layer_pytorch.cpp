@@ -47,5 +47,7 @@ int main() {
         torch::cuda::synchronize();
     });
 
+    std::cout << "Version: Pytorch" << "\n";
+    std::cout << "Input: " << N << "x" << H << "x" << W << "x" << C_in << "\n";
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 }
