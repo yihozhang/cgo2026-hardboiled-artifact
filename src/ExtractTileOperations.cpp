@@ -1699,75 +1699,95 @@ class DesugarIntrinsics : public IRMutator {
 protected:
     Stmt visit(const Store *store) override {
         const Call *rhs = store->value.as<Call>();
-        if (rhs && rhs->name == "DistributedConvolutionShuffle") {
-            const std::vector<Expr> &args = store->value.as<Call>()->args;
-            internal_assert(args.size() == 6);
+        if (rhs && on_gpu && rhs->name == "ConvolutionShuffle") {
+            const auto &args = rhs->args;
             const auto *var = args[0].as<Variable>();
             auto base_r = args[1];
             auto stride_r = args[2];
-            const auto kernel_taps = as_const_int(args[3]);
-            const auto pixels_cnt = as_const_int(args[4]);
-            const auto tile_cnt = as_const_int(args[5]);
-            if (!(var && kernel_taps.has_value() && pixels_cnt.has_value() && tile_cnt.has_value())) {
-                internal_error << "DistributedConvolutionShuffle: arguments have unexpected type\n";
-                return Stmt();
+            const auto l1_opt = as_const_int(args[3]);
+            const auto l2_opt = as_const_int(args[4]);
+            const auto steps_opt = as_const_int(args[5]);
+            const auto offset_opt = as_const_int(args[6]);
+
+            internal_assert(l1_opt && l2_opt && steps_opt && offset_opt);
+            int l1 = (int)(*l1_opt);
+            int l2 = (int)(*l2_opt);
+            int steps = (int)(*steps_opt);
+            int offset = (int)(*offset_opt);
+
+            Expr j = Variable::make(Int(32), "lane.thread_id_x");
+            Expr idx_into_filter = j + offset - Ramp::make(0, 1, l2) * steps;
+            Expr clamped_idx = clamp(idx_into_filter,
+                                     make_const(idx_into_filter.type(), 0),
+                                     make_const(idx_into_filter.type(), l1 - 1));
+            Expr mask = (clamped_idx == idx_into_filter);
+            Expr v = Load::make(Float(16, l2), var->name, base_r + stride_r * clamped_idx, {}, {}, const_true(l2), {});
+            v = select(mask, v, make_zero(Float(16, l2)));
+            // Expr v = Load::make(Float(16, l2), var->name, base_r + stride_r * idx_into_filter, {}, {}, mask, {});
+
+            const Ramp *r = store->index.as<Ramp>();
+            internal_assert(r);
+            Stmt s = Store::make(store->name, simplify(v),
+                                 simplify(Ramp::make(r->base + j * r->stride * l2, r->stride, l2)),
+                                 store->param, const_true(l2), {});
+            s = For::make(j.as<Variable>()->name, 0, l1 / steps + l2, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, s);
+            return s;
+        } else if (rhs && on_gpu && rhs->name == "ConvolutionShuffle+") {
+            const std::vector<Expr> &args = rhs->args;
+            internal_assert(args.size() == 9);
+            const auto *var = args[0].as<Variable>();
+            auto base_r = args[1];
+            auto stride_r = args[2];
+            const auto l1_opt = as_const_int(args[3]);
+            const auto l2_opt = as_const_int(args[4]);
+            const auto steps_opt = as_const_int(args[5]);
+            const auto offset_opt = as_const_int(args[6]);
+            const auto repeat_stride_opt = as_const_int(args[7]);
+            const auto repeat_count_opt = as_const_int(args[8]);
+            if (!(var && l1_opt.has_value() && l2_opt.has_value() && offset_opt.has_value() && steps_opt.has_value() &&
+                  repeat_stride_opt.has_value() && repeat_count_opt.has_value())) {
+                internal_error << "ConvolutionShuffle+: arguments have unexpected type\n";
             }
-            auto taps = kernel_taps.value() / tile_cnt.value();
-            auto pixels = pixels_cnt.value();
-            auto mat_cnt = tile_cnt.value();
-            auto ty = Float(16, kernel_taps.value());
+            auto l1 = (int)l1_opt.value();
+            auto l2 = (int)l2_opt.value();
+            auto offset = (int)offset_opt.value();
+            auto steps = (int)steps_opt.value();
+            auto repeat_stride = (int)repeat_stride_opt.value();
+            auto repeat_count = (int)repeat_count_opt.value();
 
-            std::cout << "DistributedConvolutionShuffle: " << store->name << " " << store->index << " " << store->value << std::endl;
+            Expr j = Variable::make(Int(32), "lane.thread_id_x");
+            std::vector<Stmt> stmts;
+            for (int i = 0; i < l2; i++) {
+                Expr k = Ramp::make(0, 1, repeat_count);
+                Expr idx_into_filter = j + offset - i * steps;
+                Expr clamped_idx = clamp(idx_into_filter,
+                                         make_const(idx_into_filter.type(), 0),
+                                         make_const(idx_into_filter.type(), l1 - 1));
+                Expr mask = (clamped_idx == idx_into_filter);
+                clamped_idx = clamped_idx + k * repeat_stride;
 
-            /* todo(maaz): Technically this should be pixels + taps - 1, but we are padding with zeroes here so
-               it works for now */
-            int out_matrix_rows = (pixels + taps);
+                Expr v = Load::make(Float(16, repeat_count), var->name, base_r + stride_r * clamped_idx, {}, {}, const_true(repeat_count), {});
 
-            // todo(maaz): We currently only handle cases where lanes are divisible by mat_cnt
-            internal_assert(32 % mat_cnt == 0) << mat_cnt << "\n";
-
-            int rows_per_lane = (out_matrix_rows * mat_cnt) / 32;
-            int wlanes_per_mat = 32 / mat_cnt;
-
-            std::vector<Stmt> stores;
-            vector<int> indices;
-            Expr vec1 = Load::make(ty, var->name, Ramp::make(base_r, stride_r, kernel_taps.value()), {}, {}, const_true(kernel_taps.value()), {});
-            Expr vec2 = FloatImm::make(Float(16), 0);
-
-            for (int warp_lane = 0; warp_lane < 32; warp_lane++) {
-                int mat_id = warp_lane / wlanes_per_mat;
-                int row_base = (warp_lane % wlanes_per_mat) * rows_per_lane;
-                int row_max = row_base + rows_per_lane;
-
-                for (int j = row_base; j < row_max; j++) {
-                    for (int i = 0; i < pixels; i++) {
-                        if (0 <= j - i && j - i < taps) {
-                            indices.push_back(j - i);
-                        } else {
-                            indices.push_back(kernel_taps.value());
-                        }
-                    }
-                }
-
-                int new_indices = (row_max - row_base) * pixels;
-
-                for (int i = warp_lane * new_indices; i < warp_lane * new_indices + new_indices; i++) {
-                    indices[i] = std::min(static_cast<int>(kernel_taps.value()),
-                                          static_cast<int>(indices[i] + (8 * mat_id)));
-                }
+                const Ramp *r = store->index.as<Ramp>();
+                internal_assert(r);
+                Expr store_idx =
+                    Ramp::make((j * l2 + i) * repeat_count, 1, repeat_count);
+                store_idx = r->base + store_idx * r->stride;
+                Stmt s = Store::make(store->name, simplify(v), simplify(store_idx),
+                                     store->param, const_true(repeat_count), {});
+                stmts.push_back(s);
             }
 
-            // Make the shuffle
-            auto v = Shuffle::make({vec1, vec2}, indices);
-
-            Stmt new_store = Store::make(store->name, v, store->index, store->param, store->predicate, store->alignment);
-
-            // Stmt cond = IfThenElse::make(Variable::make(Int(32), "conv_shuffle.thread_id_x") < 1, new_store);
-
-            return new_store;
+            return For::make(j.as<Variable>()->name, 0, l1 / steps + l2, ForType::GPULane, Partition::Auto, DeviceAPI::CUDA, Block::make(stmts));
         }
 
         return IRMutator::visit(store);
+    }
+
+    bool on_gpu = false;
+    Stmt visit(const For *op) override {
+        ScopedValue<bool> old_on_gpu(on_gpu, on_gpu || (op->for_type == ForType::GPUBlock));
+        return IRMutator::visit(op);
     }
 
     Expr visit(const Call *call) override {
@@ -1981,6 +2001,7 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     internal_assert(subst_stores.pending_definitions.empty());
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);
+    debug(0) << result << "\n";
     result = EqSatExtensions::DesugarIntrinsics().mutate(result);
     return result;
 }
