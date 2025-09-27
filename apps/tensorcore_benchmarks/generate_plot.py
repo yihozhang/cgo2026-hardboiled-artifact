@@ -188,10 +188,10 @@ def plot_performance_comparison(title, kernel_sizes, cudaonly_times, tensorcore_
     plt.figure(figsize=(12, 8))
     
     # Plot lines
-    plt.plot(kernel_sizes, cudaonly_times, 'o-', linewidth=2, markersize=6, 
-             label='CUDA-only schedules', color='#1f77b4', alpha=0.8)
     plt.plot(kernel_sizes, tensorcore_times, 's-', linewidth=2, markersize=6, 
              label='Tensor Cores schedules', color='#ff7f0e', alpha=0.8)
+    plt.plot(kernel_sizes, cudaonly_times, 'o-', linewidth=2, markersize=6, 
+             label='CUDA-only schedules', color='#1f77b4', alpha=0.8)
     
     # Customize the plot
     plt.xlabel('Kernel Size', fontsize=25)
@@ -203,7 +203,7 @@ def plot_performance_comparison(title, kernel_sizes, cudaonly_times, tensorcore_
     plt.xticks(kernel_sizes[::3], fontsize=20)  # Show every other size to avoid crowding
     # Make y-axis start from 0 for better comparison
     ymin, ymax = 0, max(np.max(cudaonly_times), np.max(tensorcore_times)) * 1.05
-    plt.yticks(list(range(ymin, int(np.ceil(ymax)), 1)), fontsize=20)
+    plt.yticks(list(np.arange(ymin, int(np.ceil(ymax)), 0.2)), fontsize=20)
     plt.legend(fontsize=20)
     
     # Add some styling
@@ -271,10 +271,10 @@ def plot_benchmark_bar_chart_single_kernel(data, benchmarks, kernel_sizes, idx, 
     fig, ax = plt.subplots(figsize=(14, 8))
     
     # Create bars
-    bars1 = ax.bar(x - width/2, cudaonly_values, width, 
-                  label='CUDA-only schedules', color='#1f77b4', alpha=0.8)
-    bars2 = ax.bar(x + width/2, tensorcore_values, width,
+    bars2 = ax.bar(x - width/2, tensorcore_values, width,
                   label='Tensor Cores schedules', color='#ff7f0e', alpha=0.8)
+    bars1 = ax.bar(x + width/2, cudaonly_values, width, 
+                  label='CUDA-only schedules', color='#1f77b4', alpha=0.8)
     
     # Customize the plot
     ax.set_xlabel(f'Benchmark', fontsize=25)
@@ -283,7 +283,7 @@ def plot_benchmark_bar_chart_single_kernel(data, benchmarks, kernel_sizes, idx, 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=25)
     ax.tick_params(axis="y", labelsize=20)
-    ax.legend(fontsize=20)
+    ax.legend(fontsize=20, loc='upper left')
     ax.grid(True, alpha=0.3, axis='y')
     
     # Set y-axis to start from 0
@@ -388,7 +388,7 @@ def main():
     
     if args.line_plot or args.all:
         print("Generating line plot...")
-        do_benchmark_line_plot("conv1d", "Conv1D", range(8, 129, 8), 
+        do_benchmark_line_plot("conv1d", "Conv1D", range(8, 257, 8), 
                               use_cache=args.use_cache, cache_dir=args.cache_dir)
     
     if args.bar_chart or args.all:
