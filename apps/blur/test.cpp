@@ -18,6 +18,8 @@ Buffer<uint16_t, 2> blur(Buffer<uint16_t, 2> in) {
     Buffer<uint16_t, 2> tmp(in.width() - 8, in.height());
     Buffer<uint16_t, 2> out(in.width() - 8, in.height() - 2);
 
+    // This version is slower than the Halide vanilla schedule by 2~3x because
+    // each indexing into buffer requires bounds check
     t = benchmark(5, 5, [&]() {
         for (int y = 0; y < tmp.height(); y++)
             for (int x = 0; x < tmp.width(); x++)
@@ -91,6 +93,7 @@ Buffer<uint16_t, 2> blur_halide(Buffer<uint16_t, 2> in) {
 }
 
 int main(int argc, char **argv) {
+    // 8K picture
     const int width =  7688;
     const int height = 4322;
 
@@ -98,7 +101,7 @@ int main(int argc, char **argv) {
 
     for (int y = 0; y < input.height(); y++) {
         for (int x = 0; x < input.width(); x++) {
-            input(x, y) = rand() & 0xfff;
+            input(x, y) = (y + x) & 0xfff;
         }
     }
 
@@ -108,17 +111,17 @@ int main(int argc, char **argv) {
     printf("slow blur throughput: %.1f Mpixels/s\n",
            (double)(blurry.width() * blurry.height()) / (slow_time * 1000));
 
-    Buffer<uint16_t, 2> halide = blur_halide(input);
-    double halide_time = t * 1000;
-    printf("halide blur time: %f ms\n", halide_time);
-    printf("halide blur throughput: %.1f Mpixels/s\n",
-            (double)(halide.width() * halide.height()) / (halide_time * 1000));
-
     Buffer<uint16_t, 2> speedy = blur_fast(input);
     double fast_time = t * 1000;
     printf("fast blur time: %f ms\n", fast_time);
     printf("fast blur throughput: %.1f Mpixels/s\n",
             (double)(speedy.width() * speedy.height()) / (fast_time * 1000));
+    
+    Buffer<uint16_t, 2> halide = blur_halide(input);
+    double halide_time = t * 1000;
+    printf("halide blur time: %f ms\n", halide_time);
+    printf("halide blur throughput: %.1f Mpixels/s\n",
+            (double)(halide.width() * halide.height()) / (halide_time * 1000));
         
     for (int y = 64; y < input.height() - 64; y++) {
         for (int x = 64; x < input.width() - 64; x++) {
