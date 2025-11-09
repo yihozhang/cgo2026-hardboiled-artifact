@@ -21,7 +21,7 @@ $(BIN)/%/conv1d: process.cpp $(BIN)/%/conv1d.a
 	$(eval HAS_UNDERSCORE := $(findstring _, $(SCHEDULE_KERNEL)))
 	$(eval SCHEDULE := $(if $(HAS_UNDERSCORE),$(firstword $(subst _, ,$(SCHEDULE_KERNEL))),$(SCHEDULE_KERNEL)))
 	$(eval KERNEL_SIZE := $(if $(HAS_UNDERSCORE),$(lastword $(subst _, ,$(SCHEDULE_KERNEL))),16))
-	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/conv1d.h\"" -DBENCHMARK_NAME="\"conv1d\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$(SCHEDULE)\"" -DVERIFY_OUTPUT=false -DRUN_conv1d
+	$(CXX) $(CXXFLAGS) -I$(BIN)/$* -Wall $^ -o $@ $(LDFLAGS) $(LIBHALIDE_LDFLAGS) $(IMAGE_IO_FLAGS) $(CUDA_LDFLAGS) $(OPENCL_LDFLAGS) -DBENCHMARK_HEADER="\"$(BIN)/$*/conv1d.h\"" -DBENCHMARK_NAME="\"conv1d\"" -DKERNEL_SIZE=$(KERNEL_SIZE) -DIMG_ROW=4096 -DIMG_COL=4096 -DSCHEDULE="\"$(SCHEDULE)\"" -DVERIFY_OUTPUT=false -DRUN_conv1d
 
 $(BIN)/%/conv1d.a: $(GENERATOR_BIN)/conv1d.generator
 	@mkdir -p $(@D)

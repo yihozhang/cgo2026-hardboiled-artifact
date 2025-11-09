@@ -36,7 +36,7 @@ colors = {
 }
 
 # Set up the plot
-fig, ax = plt.subplots(figsize=(14, 8))
+fig, ax = plt.subplots(figsize=(12, 8))
 
 # Position parameters
 benchmarks = list(benchmark_data.keys())
@@ -77,18 +77,20 @@ for bench_idx, benchmark in enumerate(benchmarks):
                ha='center', va='bottom', fontsize=20, rotation=0)
 
 # Customize the plot
-ax.set_xlabel('Benchmark Operations', fontsize=25, fontweight='bold')
+# ax.set_xlabel('Benchmark Operations', fontsize=25, fontweight='bold')
 ax.set_ylabel('Time (ms)', fontsize=25, fontweight='bold')
 ax.set_title('Performance Comparison on ML workloads', 
              fontsize=28, fontweight='bold', pad=20)
 
 # Set x-axis
 ax.set_xticks(x_positions)
-ax.set_xticklabels(benchmarks, fontsize=25)
+ax.set_xticklabels(benchmarks, fontsize=22)
 
 # Use log scale for y-axis due to wide range of values
 ax.set_yscale('log')
 ax.set_ylim(bottom=0.01)  # Set a reasonable bottom limit for log scale
+ymax = np.max([n for v in benchmark_data.values() for n in v.values()])
+ax.set_ylim(top=ymax * 2, bottom=0.01)
 ax.tick_params(axis="y", labelsize=20)
 # Add grid
 ax.grid(True, alpha=0.3, axis='y')
@@ -104,10 +106,10 @@ legend.get_frame().set_alpha(0.75)
 plt.tight_layout()
 
 # Add some styling
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-ax.spines['left'].set_linewidth(0.5)
-ax.spines['bottom'].set_linewidth(0.5)
+# ax.spines['top'].set_visible(False)
+# ax.spines['right'].set_visible(False)
+# ax.spines['left'].set_linewidth(0.5)
+# ax.spines['bottom'].set_linewidth(0.5)
 
 # Show the plot
 # plt.show()
