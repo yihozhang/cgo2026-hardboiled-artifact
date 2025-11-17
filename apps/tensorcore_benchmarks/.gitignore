@@ -2,3 +2,4 @@
 *.pdf
 *.txt
 cache/
+benchmark/
