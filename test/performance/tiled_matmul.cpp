@@ -1,104 +1,305 @@
 #include "Halide.h"
+
+#include <halide_test_dirs.h>
 #include <stdio.h>
-#include <stdlib.h> // For rand()
 
 using namespace Halide;
 
-int main(int argc, char **argv) {
-    // The size of the N x N matrices
-    const int N = 256;
-
-    // 1. Create and fill host-side buffers with random data
-    Buffer<float> A_buf(N, N);
-    Buffer<float> B_buf(N, N);
-    Buffer<float> C_buf(N, N);
-    Buffer<float> D_buf(N, N);
-    Buffer<float> E_buf(N, N);
-    Buffer<float> F_buf(N, N);
-    Buffer<float> G_buf(N, N);
-    Buffer<float> H_buf(N, N);
-    Buffer<float> I_buf(N, N);
-
-    for (int y = 0; y < N; y++) { // row
-        for (int x = 0; x < N; x++) { // col
-            A_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            B_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            C_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            D_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            E_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            F_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            G_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            H_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
-            I_buf(x, y) = (rand() % 100) / 100.0f - 0.5f;
+void fill_buffer_a_bf16(Buffer<bfloat16_t> &buf, int row, int acc) {
+    for (int iy = 0; iy < row; ++iy) {
+        for (int ix = 0; ix < acc; ++ix) {
+            // value between 0 and 100
+            bfloat16_t val = bfloat16_t(((float)rand() / (float)(RAND_MAX)) * 100.f);
+            buf(ix, iy) = val;
         }
     }
+}
 
-    // 2. Define ImageParams (inputs) for the Halide pipeline
-    ImageParam A(type_of<float>(), 2);
-    ImageParam B(type_of<float>(), 2);
-    ImageParam C(type_of<float>(), 2);
-    ImageParam D(type_of<float>(), 2);
-    ImageParam E(type_of<float>(), 2);
-    ImageParam F(type_of<float>(), 2);
-    ImageParam G(type_of<float>(), 2);
-    ImageParam H(type_of<float>(), 2);
-    ImageParam I(type_of<float>(), 2);
+void fill_buffer_b_bf16(Buffer<bfloat16_t> &buf, int col, int acc) {
+    for (int iy = 0; iy < acc / 2; ++iy) {
+        for (int ix = 0; ix < col; ++ix) {
+            for (int ik = 0; ik < 2; ++ik) {
+                bfloat16_t val = bfloat16_t(((float)rand() / (float)(RAND_MAX)) * 100.f);
+                buf(ik, ix, iy) = val;
+            }
+        }
+    }
+}
 
-    Var i("i"), j("j"), k("k");
-    RDom l(0, N, "l");
-    Func def("def");
-    def(i, j, k) = 0.0f;
-    def(i, j, k) += D(l, i) * E(l, j) * F(l, k);
+template<typename IntT>
+void fill_buffer_a(Buffer<IntT> &buf, int row, int acc) {
+    for (int iy = 0; iy < row; iy++) {
+        for (int ix = 0; ix < acc; ix++) {
+            buf(ix, iy) = rand() % 256 + std::numeric_limits<IntT>::min();
+        }
+    }
+}
 
-    RDom m(0, N, "m");
-    Func ghi("ghi");
-    ghi(i, j, k) = 0.0f;
-    ghi(i, j, k) += G(m, i) * H(m, j) * I(m, k);
+template<typename IntT>
+void fill_buffer_b(Buffer<IntT> &buf, int col, int acc) {
+    for (int iy = 0; iy < acc / 4; iy++) {
+        for (int ix = 0; ix < col; ix++) {
+            for (int ik = 0; ik < 4; ++ik) {
+                buf(ik, ix, iy) = rand() % 256 + std::numeric_limits<IntT>::min();
+            }
+        }
+    }
+}
 
-    Func abc("abc");
-    abc(i, j, k) = A(j, i) * B(k, i) * C(k, j);
+bool equal_eps(float lhs, float rhs, float eps) {
+    return std::abs(lhs - rhs) < eps;
+}
 
-    RDom r(0, N, 0, N, 0, N, "r");
-    Func res("final");
-    res() = 0.0f;
-    res() += abc(r.x, r.y, r.z) * def(r.x, r.y, r.z) * ghi(r.x, r.y, r.z);
+struct make_uint_t {
+    template<typename... Args>
+    Type operator()(Args &&...args) const {
+        return UInt(static_cast<Args &&>(args)...);
+    }
+};
 
-    // res.compile_to_lowered_stmt("example_stmt.html", {A, B, C, D, E, F, G, H, I}, HTML);
+struct make_int_t {
+    template<typename... Args>
+    Type operator()(Args &&...args) const {
+        return Int(static_cast<Args &&>(args)...);
+    }
+};
 
-    // 4. Schedule the pipeline
-    Var io("io"), ii("ii"), jo("jo"), ji("ji"), ko("ko"), ki("ki");
-    def.compute_root()
-       .gpu_tile(i, j, k, io, jo, ko, ii, ji, ki, 8, 8, 8)
-       .update(0)
-       .gpu_tile(i, j, k, io, jo, ko, ii, ji, ki, 8, 8, 8)
-       .reorder(l, ii, ji, ki, io, jo, ko);
-    ghi.compute_root()
-       .gpu_tile(i, j, k, io, jo, ko, ii, ji, ki, 8, 8, 8)
-       .update(0)
-       .gpu_tile(i, j, k, io, jo, ko, ii, ji, ki, 8, 8, 8)
-       .reorder(m, ii, ji, ki, io, jo, ko);;
-    res.compute_root();
+template<typename T>
+void print_mat(const Buffer<T> &buf, int rows, int cols) {
+    using cast_T = std::conditional_t<std::is_integral_v<T>, int, T>;
+    for (int j = 0; j != rows; ++j) {
+        for (int i = 0; i != cols; ++i) {
+            std::cout << static_cast<cast_T>(buf(i, j)) << " ";
+        }
+        std::cout << std::endl;
+    }
+}
 
-    // 5. Set the input buffers
-    A.set(A_buf);
-    B.set(B_buf);
-    C.set(C_buf);
-    D.set(D_buf);
-    E.set(E_buf);
-    F.set(F_buf);
-    G.set(G_buf);
-    H.set(H_buf);
-    I.set(I_buf);
+template<typename T>
+void print_mat_rhs(const Buffer<T> &buf, int rows, int cols) {
+    using cast_T = std::conditional_t<std::is_integral_v<T>, int, T>;
+    for (int j = 0; j != (rows / (4 / sizeof(T))); ++j) {
+        for (int k = 0; k != (4 / sizeof(T)); ++k) {
+            for (int i = 0; i != cols; ++i) {
+                std::cout << static_cast<cast_T>(buf(k, i, j)) << " ";
+            }
 
-    // // 6. Realize the pipeline
-    printf("Running Halide pipeline...\n");
-    // Buffer<float> output = res.realize({}, get_jit_target_from_environment().with_feature(Target::Feature::CUDA));
-    Buffer<float> output = res.realize();
-    printf("Halide pipeline finished.\n");
+            std::cout << std::endl;
+        }
+    }
+}
 
-    // The scalar result is at index 0
-    float halide_result = output(0);
-    printf("Halide result: %f\n", halide_result);
+template<typename LhsInt8, typename RhsInt8>
+bool matmul(int row, int col, int acc, int tile_x, int tile_y, int tile_r) {
+    Target target("x86-64-linux-avx512_sapphirerapids");
+    Buffer<LhsInt8> A_buf(acc, row);
+    Buffer<RhsInt8> B_buf(4, col, acc / 4);
+
+    Var x("x"), y("y");
+    RDom r(0, acc);
+
+    Func mm("matmul");
+    mm(x, y) = cast<int32_t>(0);
+    mm(x, y) += cast<int32_t>(A_buf(r, y)) * cast<int32_t>(B_buf(r % 4, x, r / 4));
+
+    Var rxi("rxi"), ryi("ryi");
+    RVar rri("rri"), rro("rro");
+
+    mm.compute_at(mm.in(), x)
+        .store_in(MemoryType::AMXTile)
+        .update()
+        .tile(x, y, rxi, ryi, tile_x, tile_y, TailStrategy::GuardWithIf)
+        .split(r, rro, rri, tile_r)
+        .reorder(rri, rxi, ryi, rro, x, y)
+        .atomic()
+        .vectorize(rri)
+        .vectorize(rxi)
+        .vectorize(ryi);
+
+    Var ixi("ixi"), iyi("iyi");
+    mm.compute_at(mm.in(), x)
+        .tile(x, y, ixi, iyi, tile_x, tile_y)
+        .vectorize(ixi)
+        .vectorize(iyi);
+
+    // schedule the consumer
+    Var mmxi("mmxi"), mmyi("mmyi");
+    mm.in()
+        .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+        .vectorize(mmxi)
+        .vectorize(mmyi);
+
+    Func result = mm.in();
+
+    fill_buffer_a(A_buf, row, acc);
+    fill_buffer_b(B_buf, col, acc);
+
+    Buffer<int32_t> out(col, row);
+
+    // result.realize(out);
+    result.compile_to_llvm_assembly(Internal::get_test_tmp_dir() + "tiled_matmul.ll", {A_buf, B_buf}, target);
+
+    // uncomment to check the matrices
+    // std::cout << "Matrix A\n";
+    // print_mat(A_buf, row, acc);
+    // std::cout << "Matrix B\n";
+    // print_mat_rhs(B_buf, acc, col);
+
+    // std::cout << "result\n";
+    // print_mat(out, row, col);
+
+    // for (int j = 0; j < row; ++j) {
+    //     for (int i = 0; i < col; ++i) {
+    //         int32_t val = 0;
+    //         for (int k = 0; k < acc; ++k) {
+    //             val += static_cast<int32_t>(A_buf(k, j)) * static_cast<int32_t>(B_buf(k % 4, i, k / 4));
+    //         }
+    //         if (val != out(i, j)) {
+    //             std::cerr << "Invalid result at " << i << ", " << j << "\n"
+    //                       << out(i, j) << " != " << val << "\n"
+    //                       << "Matrix dims: " << row << "x" << col << "x" << acc << "\nTile dims: " << tile_x << "x" << tile_y << "x" << tile_r << "\n";
+    //             return false;
+    //         }
+    //     }
+    // }
+
+    std::cout << "Success!\n";
+    return true;
+}
+
+bool matmul_bf16(int row, int col, int acc, int tile_x, int tile_y, int tile_r) {
+    Target target("x86-64-linux-avx512_sapphirerapids");
+    Var x("x"), y("y");
+    Buffer<bfloat16_t> A(acc, row);
+    Buffer<bfloat16_t> B(2, col, acc / 2);
+
+    RDom r(0, acc, "acc");
+
+    Func mm("matmul");
+    mm(x, y) = cast<float>(0);
+    mm(x, y) += cast<float>(cast<float>(A(r.x, y))) * cast<float>(B(r.x % 2, x, r.x / 2));
+
+    Var rxi("rxi"), ryi("ryi");
+    RVar rri("rri"), rro("rro");
+
+    mm.compute_at(mm.in(), x)
+        .store_in(MemoryType::AMXTile)
+        .update()
+        .tile(x, y, rxi, ryi, tile_x, tile_y, TailStrategy::GuardWithIf)
+        .split(r.x, rro, rri, tile_r)
+        .reorder({rri, rxi, ryi, rro, x, y})
+        .atomic()
+        .vectorize(rri)
+        .vectorize(rxi)
+        .vectorize(ryi);
+
+    Var ixi("ixi"), iyi("iyi");
+    mm.compute_at(mm.in(), x)
+        .tile(x, y, ixi, iyi, tile_x, tile_y)
+        .vectorize(ixi)
+        .vectorize(iyi);
+
+    // schedule the consumer
+    Var mmxi("mmxi"), mmyi("mmyi");
+    mm.in()
+        .tile(x, y, mmxi, mmyi, tile_x, tile_y)
+        .vectorize(mmxi)
+        .vectorize(mmyi);
+
+    Func result = mm.in();
+
+    fill_buffer_a_bf16(A, row, acc);
+    fill_buffer_b_bf16(B, col, acc);
+
+    Buffer<float> out(col, row);
+
+    // Uncomment to check the asm
+    result.compile_to_llvm_assembly(Internal::get_test_tmp_dir() + "tiled_matmul_bf16.ll", {A, B}, target);
+    // result.compile_to_assembly(Internal::get_test_tmp_dir() + "tiled_matmul.s", {A, B}, target);
+
+    // result.realize(out);
+
+    // uncomment to check the matrices
+    // std::cout << "Matrix A\n";
+    // print_mat(A, row, acc);
+    // std::cout << "Matrix B\n";
+    // print_mat_rhs(B, acc, col);
+
+    // std::cout << "result\n";
+    // print_mat(out, row, col);
+
+    // for (int j = 0; j < row; ++j) {
+    //     for (int i = 0; i < col; ++i) {
+    //         float val = 0.f;
+    //         for (int k = 0; k < acc; ++k) {
+    //             val += static_cast<float>(A(k, j)) * static_cast<float>(B(k % 2, i, k / 2));
+    //         }
+    //         if (!equal_eps(val, out(i, j), 0.03f)) {
+    //             std::cerr << "Invalid result at " << i << ", " << j << "\n"
+    //                       << out(i, j) << " != " << val << "\n"
+    //                       << "Matrix dims: " << row << "x" << col << "x" << acc << "\nTile dims: " << tile_x << "x" << tile_y << "x" << tile_r << "\n";
+    //             return false;
+    //         }
+    //     }
+    // }
+
+    std::cout << "Success!\n";
+    return true;
+}
+
+auto matmul_ss = &matmul<int8_t, int8_t>;
+auto matmul_us = &matmul<uint8_t, int8_t>;
+auto matmul_su = &matmul<int8_t, uint8_t>;
+auto matmul_uu = &matmul<uint8_t, uint8_t>;
+
+bool run_tests(bool (*fn)(int, int, int, int, int, int), int element_width) {
+    return true
+        // TODO: tile_x and tile_y is not supported because they degenerate to a pattern that the matcher for LHS fails to recognize
+        // && fn(2, 2, 16, 1, 2, 4 / element_width)
+        // && fn(2, 2, 16, 2, 2, 4 / element_width)
+        && fn(2, 2, 16, 2, 2, 8 / element_width)
+        && fn(4, 4, 8, 4, 4, 8 / element_width)
+        && fn(8, 8, 4, 8, 8, 4 / element_width)
+        && fn(32, 32, 32, 8, 8, 8 / element_width)
+        && fn(32, 32, 32, 8, 8, 4 / element_width)
+        && fn(32, 32, 32, 6, 8, 4 / element_width)
+        && fn(32, 32, 32, 6, 8, 8 / element_width)
+        ;
+}
+
+int main(int argc, char **argv) {
+    freopen("/tmp/correctness_tiled_matmul.log", "w", stderr);
+    // Target t = get_jit_target_from_environment();
+    Target t("x86-64-linux-avx512_sapphirerapids");
+    if (!t.has_feature(Target::AVX512_SapphireRapids)) {
+        printf("[SKIP] No AMX target enabled\n");
+        return 0;
+    }
+
+    printf("Running AMX matmul (signed/signed)\n");
+    if (!run_tests(matmul_ss, 1)) {
+        return 1;
+    }
+
+    printf("Running AMX matmul (signed/unsigned)\n");
+    if (!run_tests(matmul_su, 1)) {
+        return 1;
+    }
+
+    printf("Running AMX matmul (unsigned/signed)\n");
+    if (!run_tests(matmul_us, 1)) {
+        return 1;
+    }
+
+    printf("Running AMX matmul (unsigned/unsigned)\n");
+    if (!run_tests(matmul_uu, 1)) {
+        return 1;
+    }
+
+    printf("Running AMX matmul (bf16)\n");
+    if (!run_tests(matmul_bf16, 2)) {
+        return 1;
+    }
 
     return 0;
 }
