@@ -34,9 +34,23 @@ inline void check_cudnn(cudnnStatus_t status, const char* msg = "", const char* 
 
 // === Globals & Helpers ===
 
+#ifndef ATT_N
 constexpr int N = 64;       // batch size
+#else
+constexpr int N = ATT_N;
+#endif
+
+#ifndef ATT_L
 constexpr int L = 4096;     // sequence length
+#else
+constexpr int L = ATT_L;
+#endif
+
+#ifndef ATT_D
 constexpr int D = 64;       // head dimension
+#else
+constexpr int D = ATT_D;
+#endif
 
 cublasHandle_t cublas_handle;
 cublasLtHandle_t lt_handle;

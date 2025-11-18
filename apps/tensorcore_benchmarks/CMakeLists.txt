@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(tensorcore_benchmarks)
+project(tensorcore_benchmarks LANGUAGES CXX CUDA)
 
 enable_testing()
 
@@ -7,6 +7,8 @@ enable_testing()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED YES)
 
 # Conv parameters
 set(CONV_KERNEL_SIZE 16 CACHE STRING "Size of the convolution kernel")
@@ -45,6 +47,18 @@ find_package(JPEG REQUIRED)
 
 # Find CUDA and cuBLAS for baseline comparisons
 find_package(CUDAToolkit REQUIRED)
+
+# Find cuDNN manually (not part of CUDAToolkit package)
+find_library(CUDNN_LIBRARY cudnn HINTS ${CUDAToolkit_LIBRARY_DIR} PATH_SUFFIXES lib lib64)
+find_path(CUDNN_INCLUDE_DIR cudnn.h HINTS ${CUDAToolkit_INCLUDE_DIRS} PATH_SUFFIXES include)
+if(NOT CUDNN_LIBRARY)
+    message(FATAL_ERROR "cuDNN library not found")
+endif()
+if(NOT CUDNN_INCLUDE_DIR)
+    message(FATAL_ERROR "cuDNN headers not found")
+endif()
+message(STATUS "Found cuDNN: ${CUDNN_LIBRARY}")
+message(STATUS "Found cuDNN headers: ${CUDNN_INCLUDE_DIR}")
 
 # Find Pytorch
 set(CMAKE_PREFIX_PATH "/opt/libtorch")
@@ -316,6 +330,7 @@ target_link_libraries(attention
 add_executable(matmul_cublas baselines/matmul_baseline.cpp)
 add_executable(conv_layer_pytorch baselines/conv_layer_pytorch.cpp)
 add_executable(attention_pytorch baselines/attention_pytorch.cpp)
+add_executable(attention_cudnn baselines/attention_cudnn.cu)
 
 target_link_libraries(matmul_cublas
     PRIVATE
@@ -337,6 +352,15 @@ target_link_libraries(attention_pytorch
     Halide::Tools
 )
 
+target_link_libraries(attention_cudnn
+    PRIVATE
+    Halide::Tools
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cublasLt
+    ${CUDNN_LIBRARY}
+)
+
 target_compile_definitions(matmul_cublas
     PRIVATE
     MATMUL_M=${MATMUL_M}
@@ -344,6 +368,15 @@ target_compile_definitions(matmul_cublas
     MATMUL_K=${MATMUL_K}
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
+
+target_compile_definitions(attention_cudnn
+    PRIVATE
+    ATT_D=${ATT_D}
+    ATT_L=${ATT_L}
+    ATT_N=${ATT_N}
+)
+
+target_include_directories(attention_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
 
 target_compile_definitions(conv_layer_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 target_compile_definitions(attention_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
