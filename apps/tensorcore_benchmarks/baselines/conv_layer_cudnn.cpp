@@ -32,8 +32,35 @@ using namespace Halide::Tools;
     } while (0)
 
 int main() {
-    const int N = 4096, C = 16, H = 64, W = 64;
+    #ifndef NN_TENSOR_N
+    const int N = 4096;
+#else
+    const int N = NN_TENSOR_N;
+#endif
+
+#ifndef NN_TENSOR_C
+    const int C = 16;
+#else
+    const int C = NN_TENSOR_C;
+#endif
+
+#ifndef NN_TENSOR_H
+    const int H = 64;
+#else
+    const int H = NN_TENSOR_H;
+#endif
+
+#ifndef NN_TENSOR_W
+    const int W = 64;
+#else
+    const int W = NN_TENSOR_W;
+#endif
+
+#ifndef KERNEL_SIZE
     const int kSize = 3;
+#else
+    const int kSize = KERNEL_SIZE;
+#endif
     const int pad_h = 1, pad_w = 1;
     const int stride_h = 1, stride_w = 1;
 
