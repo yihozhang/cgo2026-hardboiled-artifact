@@ -908,6 +908,14 @@ struct SubstKernelLoads : public EqSatIRMutator {
                 args[1] = args[1] + offset;
                 return Call::make(call->type, call->name, args, call->call_type, call->func, call->value_index, call->image, call->param);
             }
+        } else if (call->name == "tile_load") {
+            const Variable *buff = call->args[2].as<Variable>();
+            if (buff && buff->name == old_buffer_name) {
+                std::vector<Expr> args = call->args;
+                args[2] = Variable::make(args[2].type(), new_buffer_name);
+                args[3] = args[3] + offset;
+                return Call::make(call->type, call->name, args, call->call_type, call->func, call->value_index, call->image, call->param);
+            }
         }
         return EqSatIRMutator::visit(call);
     }
