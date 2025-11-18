@@ -35,8 +35,8 @@ bool matmul_bf16(Halide::Target target) {
     mm(x, y) += cast<float>(cast<float>(A(r.x, y))) * cast<float>(B(x, r.x));
 
     int tile_x = 16;
-    int tile_y = 32;
-    int tile_r = 16;
+    int tile_y = 16;
+    int tile_r = 32;
 
 
     Var cx("cx"), cy("cy");

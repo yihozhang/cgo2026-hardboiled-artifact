@@ -1,3 +1,95 @@
+# HardBoiled: Pushing Tensor Accelerators Beyond MatMul in a User-Schedulable Language
+
+This is the artifact of HardBoiled, which is based on the Halide project.
+
+## Get started
+
+### Build LLVM
+
+```
+$ git clone --depth 1 --branch llvmorg-19.1.5 https://github.com/llvm/llvm-project.git
+$ cmake -G Ninja -S llvm-project/llvm -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_PROJECTS="clang;lld;clang-tools-extra" \
+        -DLLVM_ENABLE_RUNTIMES=compiler-rt \
+        -DLLVM_TARGETS_TO_BUILD="WebAssembly;X86;AArch64;ARM;Hexagon;NVPTX;PowerPC;RISCV" \
+        -DLLVM_ENABLE_ASSERTIONS=ON \
+        -DLLVM_ENABLE_EH=ON \
+        -DLLVM_ENABLE_RTTI=ON \
+        -DLLVM_ENABLE_HTTPLIB=OFF \
+        -DLLVM_ENABLE_LIBEDIT=OFF \
+        -DLLVM_ENABLE_LIBXML2=OFF \
+        -DLLVM_ENABLE_TERMINFO=OFF \
+        -DLLVM_ENABLE_ZLIB=OFF \
+        -DLLVM_ENABLE_ZSTD=OFF \
+        -DLLVM_BUILD_32_BITS=OFF
+$ cmake --build build
+$ cmake --install build --prefix llvm-install
+```
+
+### Build Halide
+
+```
+$ cmake -G Ninja  -S . -B build -DCMAKE_BUILD_TYPE=Release -DHalide_LLVM_ROOT=<path-to-llvm-install>
+$ cmake --build build
+$ LLVM_CONFIG=<path-to-llvm-install>/bin/llvm-config make distrib -j<num-threads>
+```
+
+### Build egglog-halide-sidecar
+
+Install cargo package manager:
+
+        https://doc.rust-lang.org/cargo/getting-started/installation.html
+
+```
+$ git clone https://github.com/yihozhang/egglog-halide-sidecar
+$ cd egglog-halide-sidecar
+$ git submodule init
+$ git submodule update
+$ cargo install --path .
+```
+
+### Support for schedules in AMX
+
+To check that our AMX schedule runs using Intel's Software Development Emulator,
+
+Build the AMX schedules
+```
+cmake --build build --target \
+    instrsel-benchmarks_matmul_vnni_1x1 \
+    instrsel-benchmarks_matmul_vnni_1x4 \
+    instrsel-benchmarks_matmul_vnni_1x4_preload_rhs \
+    instrsel-benchmarks_matmul_flat_1x1 \
+    instrsel-benchmarks_matmul_flat_1x4
+```
+
+Run them using a simulator
+
+```
+<path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_vnni_1x1
+<path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_vnni_1x4
+<path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_vnni_1x4_preload_rhs
+<path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_flat_1x1
+<path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_flat_1x4
+```
+
+### Performance comparison on ML workloads
+
+### Conv1D performance comparison
+
+### Performance comparison on 2D microbenchmarks
+
+k=16 and k=32
+
+### Building and running the case studies
+
+
+---
+
+**Halide's original README below**
+
+---
+
 # Halide
 
 Halide is a programming language designed to make it easier to write
