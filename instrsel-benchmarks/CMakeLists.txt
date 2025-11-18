@@ -6,6 +6,3 @@ tests(GROUPS instrsel-benchmarks
         matmul_vnni_1x4.cpp
         matmul_vnni_1x1.cpp
 )
-
-# Disable PCH for this target
-set_target_properties(instrsel-benchmarks_convolution PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
