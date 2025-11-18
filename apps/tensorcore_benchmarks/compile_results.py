@@ -10,48 +10,28 @@ schedules = ["cudaonly", "tensorcore"]
 # Define each benchmark as a dictionary with command-line flag names
 benchmarks = [
     # Conv1D
-    #{"-b": "conv1d", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
-    #{"-b": "conv1d", "-conv_k": 32, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 48, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 64, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 80, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 96, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 112, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv1d", "-conv_k": 128, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    
+    #{"-b": "conv1d", "-conv_k": 8, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
     
     # Conv2D
-    #{"-b": "conv2d", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 32, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 48, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 64, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 80, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 96, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 112, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
-    #{"-b": "conv2d", "-conv_k": 128, "-conv_col": 4096, "-conv_row": 4096, "-v": False},
+    #{"-b": "conv2d", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
     
     # Upsample
     #{"-b": "upsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
-    #{"-b": "upsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
     
     # Downsample
     #{"-b": "downsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
-    #{"-b": "downsample", "-conv_k": 16, "-conv_col": 7680, "-conv_row": 4320, "-v": False},
+
+    # Denoise
+    #{"-b": "denoise", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+
+    # Resize
+    {"-b": "resize", "-conv_col": 4096, "-conv_row": 4096, "-u": True, "-v": True},
 
     # Matmul
-    {"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": False},
-    {"-b": "matmul", "-mm_mnk": [4096, 4096, 4096],  "-v": False},
-    #{"-b": "matmul", "-mm_mnk": 2048,  "-v": False},
-    #{"-b": "matmul", "-mm_mnk": 4096,  "-v": False},
+    #{"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": True},
 
     # Conv Layer (NHWC)
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [256, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [512, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [1024, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [2048, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [4096, 64, 64, 32], "-v": False},
-    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [8192, 64, 64, 32], "-v": False},
+    #{"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": True},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -140,7 +120,7 @@ def compute_speedups(results):
 
     # Compute speedups
     speedups = []
-    for (benchmark, ksize, width, height), runtimes in configs.items():
+    for (benchmark, ksize, input_size), runtimes in configs.items():
         if 'cudaonly' in runtimes and 'tensorcore' in runtimes:
             cuda_time = runtimes['cudaonly']
             tensor_time = runtimes['tensorcore']
@@ -163,6 +143,10 @@ def dict_to_cmd_args(benchmark_dict):
         if flag == "-v" and value:
             args.append(flag)
         elif flag == "-v" and not value:
+            continue
+        elif flag == "-u" and value:
+            args.append(flag)
+        elif flag == "-u" and not value:
             continue
         elif isinstance(value, list):
             args.append(flag)

@@ -13,6 +13,9 @@ set(CONV_KERNEL_SIZE 16 CACHE STRING "Size of the convolution kernel")
 set(CONV_IMG_ROW 4096 CACHE STRING "Height of the input image")
 set(CONV_IMG_COL 4096 CACHE STRING "Width of the input image")
 
+# Resize parameters
+set(UPSAMPLE true CACHE BOOL "Whether to upsample (true) or downsample (false)")
+
 # NHWC parameters for NN layers
 set(NN_TENSOR_N 128 CACHE STRING "Batch size (N) for NN layers")
 set(NN_TENSOR_H 64 CACHE STRING "Image height (H) for NN layers")
@@ -39,6 +42,9 @@ find_package(Halide REQUIRED)
 # Find PNG and JPEG for image I/O
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
+
+# Find CUDA and cuBLAS for baseline comparisons
+find_package(CUDAToolkit REQUIRED)
 
 # Find Pytorch
 set(CMAKE_PREFIX_PATH "/opt/libtorch")
@@ -75,13 +81,13 @@ add_conv_library(downsample_lib downsample host-cuda-cuda_capability_80)
 add_conv_library(downsample_lib_win downsample x86-64-windows-cuda-cuda_capability_80)
 add_conv_library(downsample_lib_linux downsample x86-64-linux-cuda-cuda_capability_80)
 
-add_simple_library(denoise_lib denoise host-cuda-cuda_capability_80)
-add_simple_library(denoise_lib_win denoise x86-64-windows-cuda-cuda_capability_80)
-add_simple_library(denoise_lib_linux denoise x86-64-linux-cuda-cuda_capability_80)
+add_denoise_library(denoise_lib denoise host-cuda-cuda_capability_80)
+add_denoise_library(denoise_lib_win denoise x86-64-windows-cuda-cuda_capability_80)
+add_denoise_library(denoise_lib_linux denoise x86-64-linux-cuda-cuda_capability_80)
 
-add_conv_library(resize_lib resize host-cuda-cuda_capability_80)
-add_conv_library(resize_lib_win resize x86-64-windows-cuda-cuda_capability_80)
-add_conv_library(resize_lib_linux resize x86-64-linux-cuda-cuda_capability_80)
+add_resize_library(resize_lib resize host-cuda-cuda_capability_80)
+add_resize_library(resize_lib_win resize x86-64-windows-cuda-cuda_capability_80)
+add_resize_library(resize_lib_linux resize x86-64-linux-cuda-cuda_capability_80)
 
 add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
@@ -170,7 +176,6 @@ target_compile_definitions(resize
     BENCHMARK_HEADER="resize_lib.h"
     BENCHMARK_NAME="resize"
     RUN_resize
-    KERNEL_SIZE=${CONV_KERNEL_SIZE}
     IMG_ROW=${CONV_IMG_ROW}
     IMG_COL=${CONV_IMG_COL}
     SCHEDULE="${SCHEDULE}"
@@ -252,6 +257,15 @@ target_link_libraries(denoise
     JPEG::JPEG
 )
 
+target_link_libraries(resize
+    PRIVATE
+    resize_lib
+    Halide::Halide
+    Halide::Tools
+    #PNG::PNG
+    #JPEG::JPEG
+)
+
 target_link_libraries(matmul
     PRIVATE
     matmul_lib
@@ -280,9 +294,10 @@ add_executable(attention_pytorch baselines/attention_pytorch.cpp)
 
 target_link_libraries(matmul_cublas
     PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUBLAS_LIBRARIES}
     Halide::Tools
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cublasLt
 )
 
 target_link_libraries(conv_layer_pytorch
@@ -305,6 +320,5 @@ target_compile_definitions(matmul_cublas
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
-#target_include_directories(matmul_cublas PRIVATE ${CUDA_INCLUDE_DIRS})
 target_compile_definitions(conv_layer_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 target_compile_definitions(attention_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
