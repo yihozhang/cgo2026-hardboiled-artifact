@@ -46,9 +46,6 @@ Expr EqSatIRParser::parse_expr() {
         auto type = parse_type();
         auto name = parse_var();
         auto index = parse_expr();
-        if (const ExprVar *v = name->to_expr_var()) {
-            debug(0) << "Load expr: " << v->expr << "\n";
-        }
         result = GLoad::make(type, name, index, Buffer<>(), Parameter(), const_true(type.lanes()), ModulusRemainder());
     } else if (is_head("Ramp")) {
         auto base = parse_expr();
