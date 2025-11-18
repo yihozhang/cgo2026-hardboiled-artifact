@@ -381,36 +381,9 @@ int main(int argc, char **argv) {
         output.device_sync();
     });
 
-    // These coefficients create a slowly-decaying oscillating impulse response
-    float a1_32 = 1.8, a2_32 = -0.9;
-    uint16_t a1 = Halide::float16_t(a1_32);
-    uint16_t a2 = Halide::float16_t(a2_32);
-
-    // The algorithm we're using needs some of the impulse response of the
-    // filter. This doesn't vary with the input - just the coefficients, so it
-    // should be precomputed. May as well do it in high precision. We also need
-    // the impulse response convolved with [1 -a1], so we'll compute that too as
-    // a second channel. See the generator source for why we want these.
-    Buffer<Halide::float16_t> impulse(16384 * 2, 2);  // Ought to be enough. We'll get an error if not.
-    double p2 = 0.0, p1 = 1.0;
-    impulse(0, 0) = Halide::float16_t(1.0);
-    for (int i = 1; i < impulse.width(); i++) {
-        double next = a1_32 * p1 + a2_32 * p2;
-        p2 = p1;
-        p1 = next;
-        impulse(i, 0) = Halide::float16_t(next);
-        impulse(i - 1, 1) = Halide::float16_t(p1 - a1_32 * p2);
+    if (output.has_device_allocation()) {
+        output.copy_to_host();
     }
-
-    impulse.raw_buffer()->type = halide_type_t(halide_type_float, 16);
-
-    // Call the generated function
-    auto time = benchmark(20, 20, [&]() {
-        // NB: Hardcode the coefficients for now
-        rec_filter(img.raw_buffer(), a1, a2, impulse, output.raw_buffer());
-        output.device_sync();
-    });
-    output.copy_to_host();
 
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
