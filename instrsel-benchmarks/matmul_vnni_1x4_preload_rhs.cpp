@@ -7,6 +7,25 @@
 
 using namespace Halide;
 
+template<typename IntT>
+void fill_buffer_a(Buffer<IntT> &buf, int row, int acc) {
+    for (int iy = 0; iy < row; iy++) {
+        for (int ix = 0; ix < acc; ix++) {
+            buf(ix, iy) = rand() % 256 + std::numeric_limits<IntT>::min();
+        }
+    }
+}
+
+template<typename IntT>
+void fill_buffer_b(Buffer<IntT> &buf, int col, int acc) {
+    for (int iy = 0; iy < acc / 4; iy++) {
+        for (int ix = 0; ix < col; ix++) {
+            for (int ik = 0; ik < 4; ++ik) {
+                buf(ik, ix, iy) = rand() % 256 + std::numeric_limits<IntT>::min();
+            }
+        }
+    }
+}
 
 bool matmul(Halide::Target target) {
     (void)target;
@@ -28,9 +47,9 @@ bool matmul(Halide::Target target) {
     mm(x, y) = cast<int32_t>(0);
     mm(x, y) += cast<int32_t>(A(r, y)) * cast<int32_t>(B(r % 4, x, r / 4));
 
-    int tile_x = 32;
-    int tile_y = 32;
-    int tile_r = 32;
+    int tile_x = 8;
+    int tile_y = 8;
+    int tile_r = 8;
 
     Var cx("cx"), cy("cy");
     Var rxi("rxi"), ryi("ryi");
@@ -78,6 +97,16 @@ bool matmul(Halide::Target target) {
     // mm.in().output_buffer().dim(3).set_bounds(0, 2);
 
     Func result = mm.in();
+
+    int row = 32, col = 32;
+    Buffer<int8_t> A_buf(acc, row);
+    Buffer<uint8_t> B_buf(4, col, acc / 4);
+    fill_buffer_a(A_buf, row, acc);
+    fill_buffer_b(B_buf, col, acc);
+    A.set(A_buf);
+    B.set(B_buf);
+    Buffer<int32_t> out(col, row);
+    result.realize(out, target);
 
     // Uncomment to check the asm
     // result.compile_to_llvm_assembly(Internal::get_test_tmp_dir() + "tiled_matmul_bf16.ll", {A, B}, target);

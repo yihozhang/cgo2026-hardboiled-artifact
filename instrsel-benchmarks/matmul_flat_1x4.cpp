@@ -7,10 +7,20 @@
 
 using namespace Halide;
 
+template<typename T>
+void fill_buffer_flat(Buffer<T> &buf, int row, int acc) {
+    for (int iy = 0; iy < row; ++iy) {
+        for (int ix = 0; ix < acc; ++ix) {
+            T val = T(rand() % 2);
+            buf(ix, iy) = val;
+        }
+    }
+}
+
 bool matmul_bf16(Halide::Target target) {
     (void)target;
 
-    const int acc = 4096;
+    const int acc = 128;
     const int X_ACC = 1;
     const int Y_ACC = 2;
 
@@ -73,6 +83,20 @@ bool matmul_bf16(Halide::Target target) {
     // mm.in().output_buffer().dim(3).set_bounds(0, 2);
 
     Func result = mm.in();
+
+    // test
+    int row = 64;
+    int col = 64;
+    Buffer<bfloat16_t> a_buf(acc, row);
+    fill_buffer_flat(a_buf, row, acc);
+    A.set(a_buf);
+
+    Buffer<bfloat16_t> b_buf(col, acc);
+    fill_buffer_flat(b_buf, acc, col);
+    B.set(b_buf);
+
+    Buffer<float> out(col, row);
+    result.realize(out, target);
 
     // Uncomment to check the asm
     // result.compile_to_llvm_assembly(Internal::get_test_tmp_dir() + "tiled_matmul_bf16.ll", {A, B}, target);
