@@ -32,7 +32,7 @@ using namespace Halide::Tools;
     } while (0)
 
 int main() {
-    const int N = 2048, C = 16, H = 64, W = 64;
+    const int N = 4096, C = 16, H = 64, W = 64;
     const int kSize = 3;
     const int pad_h = 1, pad_w = 1;
     const int stride_h = 1, stride_w = 1;
@@ -65,7 +65,7 @@ int main() {
         stride_h, stride_w,
         1, 1,
         CUDNN_CROSS_CORRELATION,
-        CUDNN_DATA_HALF)); // accumulate in fp32 (fix)
+        CUDNN_DATA_FLOAT)); // accumulate in fp32 (fix)
 
     // Allow TensorCore math
     CHECK_CUDNN(cudnnSetConvolutionMathType(convDesc, CUDNN_TENSOR_OP_MATH_ALLOW_CONVERSION));
@@ -97,7 +97,7 @@ int main() {
     size_t inputBytes  = N * C * H * W * sizeof(__half);
     size_t filterBytes = C * C * kSize * kSize * sizeof(__half);
     size_t biasBytes   = outC * sizeof(__half);
-    size_t outputBytes = outN * outC * outH * outW * sizeof(float);
+    size_t outputBytes = outN * outC * outH * outW * sizeof(__half);
 
     __half* d_input;  CHECK_CUDA(cudaMalloc(&d_input, inputBytes));
     __half* d_filter; CHECK_CUDA(cudaMalloc(&d_filter, filterBytes));
@@ -127,12 +127,6 @@ int main() {
             bestIdx = i;
         }
     }
-
-    std::cout << "Selected Algo " << perf[bestIdx].algo
-                << " time " << perf[bestIdx].time << " ms"
-                << " ws " << perf[bestIdx].memory/(1024.0*1024.0) << " MB"
-                << " mathType " << perf[bestIdx].mathType
-                << std::endl;
 
     cudnnConvolutionFwdAlgo_t algo = perf[bestIdx].algo;
     
@@ -170,7 +164,9 @@ int main() {
         cudaDeviceSynchronize();
     });
 
-    std::cout << "Average conv+bias+ReLU time (NHWC): "
+    std::cout << "Version: cuDNN" << "\n";
+    std::cout << "Input: " << N << "x" << H << "x" << W << "x" << C << "\n";
+    std::cout << "Runtime: "
               << std::fixed << std::setprecision(6)
               << time << std::endl;
 

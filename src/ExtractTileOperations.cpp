@@ -857,7 +857,7 @@ protected:
     std::string prefix;
     int store_no = 0;
     std::vector<PrologueStmt> prologues;
-    Expr visit(const GLoad *load) override {
+    Expr visit(const GLoad *load) override {              
         if (const StringVar *v = load->name->to_string_var()) {
             return Load::make(load->type, v->name, EqSatIRMutator::mutate(load->index), load->image, load->param, EqSatIRMutator::mutate(load->predicate), load->alignment);
         } else if (const ExprVar *v = load->name->to_expr_var()) {
@@ -866,6 +866,7 @@ protected:
             Expr index = EqSatIRMutator::mutate(load->index);
 
             std::string name = prefix + std::to_string(store_no++);
+
             prologues.emplace_back(name, mutate(v->expr));
             return Load::make(load->type, name, index, load->image, load->param, predicate, load->alignment);
         } else {
@@ -1109,6 +1110,7 @@ struct SubstStores : public EqSatIRMutator {
     }
 
     Stmt get_mutated_program() {
+        // Traverse program to collect pending definitions
         Stmt out = this->mutate(program);
 
         // Delete duplicate pending definitions
@@ -1118,7 +1120,7 @@ struct SubstStores : public EqSatIRMutator {
             for (size_t j = 0; j < unique_pending_definitions.size(); j++) {
                 // If they are exactly equal, we can replace the first with the second
                 if (equal(pending_definitions[i].expr, unique_pending_definitions[j].expr)) {
-                    debug(0) << "Found equals: " << pending_definitions[i].name << " and " << unique_pending_definitions[j].name << ": " << pending_definitions[i].expr << "\n";
+                    debug(2) << "Found equals: " << pending_definitions[i].name << " and " << unique_pending_definitions[j].name << ": " << pending_definitions[i].expr << "\n";
                     SubstKernelLoads subst_kernel_loads(pending_definitions[i].name, unique_pending_definitions[j].name, 0);
                     out = subst_kernel_loads.mutate(out);
                     unique = false;
@@ -1151,7 +1153,7 @@ struct SubstStores : public EqSatIRMutator {
                         bool can_merge_0_1 = can_merge_shuffles(c0, c1);
                         bool can_merge_1_0 = can_merge_shuffles(c1, c0);
                         if (can_merge_0_1 || can_merge_1_0) {
-                            debug(0) << "Can merge " << pending_definitions[i].expr << " and " << pending_definitions[j].expr << "\n";
+                            debug(2) << "Can merge " << pending_definitions[i].expr << " and " << pending_definitions[j].expr << "\n";
                             // Add all pending definitions to merged_pending_definitions, except the one we are merging
                             for (size_t k = 0; k < pending_definitions.size(); k++) {
                                 if (k != i && k != j) {
@@ -1189,7 +1191,7 @@ struct SubstStores : public EqSatIRMutator {
             if (merge_happened) {
                 pending_definitions = merged_pending_definitions;
             }
-        };
+        }
 
         InsertPendingDefinition ipd(out);
 
@@ -1286,8 +1288,6 @@ struct SubstStores : public EqSatIRMutator {
 
                     // It may be exactly equal to a pending definition
                     if (equal(pending_definition.expr, prologue.expr)) {
-                        debug(0) << "Found equals: " << pending_definition.expr << " and " << prologue.expr << "\n";
-                        debug(0) << "Replacing " << prologue.name << " with " << pending_definition.name << "\n";
                         SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, 0);
                         s = subst_kernel_loads.mutate(s);
                         merged = true;
@@ -1299,8 +1299,6 @@ struct SubstStores : public EqSatIRMutator {
                     if (existing_call && existing_call->name == "ConvolutionShuffle") {
                         if (can_merge_shuffles(new_call, existing_call)) {
                             pending_definition.expr = merge_shuffles(new_call, existing_call);
-                            debug(0) << "Merge result: " << pending_definition.expr << "\n";
-
                             int offset = existing_call->type.lanes();
                             SubstKernelLoads subst_kernel_loads(prologue.name, pending_definition.name, offset);
                             s = subst_kernel_loads.mutate(s);
@@ -2025,7 +2023,6 @@ Stmt eqsat_extract_tile_operations(const Stmt &s) {
     result = subst_stores.get_mutated_program();
     result = EqSatExtensions::EnforceAMXShape().mutate(result);
     result = EqSatExtensions::EnforceWMMALanes().mutate(result);
-    debug(0) << result << "\n";
     result = EqSatExtensions::DesugarIntrinsics().mutate(result);
     return result;
 }
