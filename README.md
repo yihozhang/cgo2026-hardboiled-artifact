@@ -23,16 +23,19 @@ $ cmake -G Ninja -S llvm-project/llvm -B build \
         -DLLVM_ENABLE_ZLIB=OFF \
         -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_BUILD_32_BITS=OFF
+        -DLLVM_ENABLE_BINDINGS=OFF
 $ cmake --build build
 $ cmake --install build --prefix llvm-install
 ```
 
 ### Build Halide
 
+Under the Halide root directory:
+
 ```
 $ cmake -G Ninja  -S . -B build -DCMAKE_BUILD_TYPE=Release -DHalide_LLVM_ROOT=<path-to-llvm-install>
 $ cmake --build build
-$ LLVM_CONFIG=<path-to-llvm-install>/bin/llvm-config make distrib -j<num-threads>
+$ cmake --install ./build --prefix halide-install
 ```
 
 ### Build egglog-halide-sidecar
@@ -63,7 +66,13 @@ cmake --build build --target \
     instrsel-benchmarks_matmul_flat_1x4
 ```
 
-Run them using a simulator
+Run AMX schedules using a emulator
+
+* First download and extract Intel Software Development Emulator
+
+        https://www.intel.com/content/www/us/en/download/684897/intel-software-development-emulator.html
+
+* Then run the following command to simulate instruction sets of a Sapphire Rapids CPU.
 
 ```
 <path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_vnni_1x1
@@ -73,16 +82,50 @@ Run them using a simulator
 <path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_flat_1x4
 ```
 
+### Performance on Tensor Cores
+
+All the following experiments can be run under the directory `apps/tensorcore_benchmarks`.
+
+It requires CUDA, pytorch (C++ library), and cuDNN to be installed.
+
+The data reported in the paper is done on an Nvidia A100 (ML workloads) and an RTX 4070 (the image 
+processing workloads), for which the Halide schedule is carefully tuned. We cannot guarantee the
+same speedup if a different GPU is used.
+
 ### Performance comparison on ML workloads
+
+```
+python3 ml_plot.py
+```
+
+This should generate a `benchmark_comparison.pdf` under `apps/tensorcore_benchmarks`.
 
 ### Conv1D performance comparison
 
+```
+python3 ml_plot.py --line-plot
+```
+
+This should generate a `conv1d_performance_comparison.pdf`.
+
 ### Performance comparison on 2D microbenchmarks
 
-k=16 and k=32
+```
+python3 ml_plot.py --bar-chart
+```
 
 ### Building and running the case studies
 
+To run the `resize`, `rec_filter`, and `denoise` case studies in the paper
+
+```
+cmake -S . -B build -DCMAKE_PREFIX_PATH=../../halide-install 
+cmake --build build --target denoise resize rec_filter
+```
+
+The executable should be under the `build` directory. Similarly, you can specify other 
+targets (matmul, conv_layer, attention, conv1d, conv2d, upsample, downsample) to generate
+exectuables for other benchmarks.
 
 ---
 
