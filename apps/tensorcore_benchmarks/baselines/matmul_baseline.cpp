@@ -63,9 +63,21 @@ void matmul_cublasLt(const half* h_A, const half* h_B, float* h_C, int M, int N,
 
 int main(int argc, char **argv) {                                     
     // Create test data using compile-time definitions                
-    const int M = 4096;//MATMUL_M;                                    
-    const int N = 4096;//MATMUL_N;                                         
-    const int K = 4096;//MATMUL_K;
+#ifndef MATMUL_M
+    const int M = 1024;
+#else
+    const int M = MATMUL_M;
+#endif
+#ifndef MATMUL_N
+    const int N = 1024;
+#else
+    const int N = MATMUL_N;
+#endif
+#ifndef MATMUL_K
+    const int K = 1024;
+#else
+    const int K = MATMUL_K;
+#endif
     
     std::string benchmark_name = "matmul";//BENCHMARK_NAME;
 

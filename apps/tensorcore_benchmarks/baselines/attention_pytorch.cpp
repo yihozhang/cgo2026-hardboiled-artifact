@@ -5,36 +5,36 @@
 
 using namespace Halide::Tools;
 
-// -------------------------------------------------------------------
-// Built-in attention (nn::MultiheadAttention)
-// -------------------------------------------------------------------
-torch::Tensor attention_builtin(torch::Tensor Q, torch::Tensor K, torch::Tensor V) {
-    int64_t embed_dim = Q.size(-1);
+// // -------------------------------------------------------------------
+// // Built-in attention (nn::MultiheadAttention)
+// // -------------------------------------------------------------------
+// torch::Tensor attention_builtin(torch::Tensor Q, torch::Tensor K, torch::Tensor V) {
+//     int64_t embed_dim = Q.size(-1);
 
-    // Create MHA with default layout (seq_len, batch, embed_dim)
-    auto mha = torch::nn::MultiheadAttention(
-        torch::nn::MultiheadAttentionOptions(embed_dim, 1)  // no batch_first
-    );
+//     // Create MHA with default layout (seq_len, batch, embed_dim)
+//     auto mha = torch::nn::MultiheadAttention(
+//         torch::nn::MultiheadAttentionOptions(embed_dim, 1)  // no batch_first
+//     );
 
-    mha->to(Q.device(), Q.scalar_type());
+//     mha->to(Q.device(), Q.scalar_type());
 
-    // Convert [N, L, D] -> [L, N, D]
-    auto Q_t = Q.transpose(0, 1);
-    auto K_t = K.transpose(0, 1);
-    auto V_t = V.transpose(0, 1);
+//     // Convert [N, L, D] -> [L, N, D]
+//     auto Q_t = Q.transpose(0, 1);
+//     auto K_t = K.transpose(0, 1);
+//     auto V_t = V.transpose(0, 1);
 
-    // Forward pass → output in fp16, accumulated internally in fp32
-    std::tuple<torch::Tensor, torch::Tensor> output;
-    auto time = benchmark(5, 5, [&]() {
-        output = mha->forward(Q_t, K_t, V_t);
-        torch::cuda::synchronize();
-    });
+//     // Forward pass → output in fp16, accumulated internally in fp32
+//     std::tuple<torch::Tensor, torch::Tensor> output;
+//     auto time = benchmark(5, 5, [&]() {
+//         output = mha->forward(Q_t, K_t, V_t);
+//         torch::cuda::synchronize();
+//     });
     
-    std::cout << "Runtime (fused): " << std::fixed << std::setprecision(9) << time << "\n";
+//     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
-    // Back to [N, L, D]
-    return std::get<0>(output);
-}
+//     // Back to [N, L, D]
+//     return std::get<0>(output);
+// }
 
 // -------------------------------------------------------------------
 // Manual attention: scores = (QK^T) / sqrt(d); softmax; probs*V
@@ -60,7 +60,23 @@ torch::Tensor attention_manual(torch::Tensor Q, torch::Tensor K, torch::Tensor V
 
 int main() {
     torch::Device device(torch::kCUDA);
-    int64_t N = 64, L = 4096, D = 64;
+#ifndef ATT_N
+    constexpr int N = 64;       // batch size
+#else
+    constexpr int N = ATT_N;
+#endif
+
+#ifndef ATT_L
+    constexpr int L = 4096;     // sequence length
+#else
+    constexpr int L = ATT_L;
+#endif
+
+#ifndef ATT_D
+    constexpr int D = 64;       // head dimension
+#else
+    constexpr int D = ATT_D;
+#endif
 
     // Random input (Q=K=V for simplicity)
     auto q = torch::randn({N, L, D},
@@ -76,7 +92,7 @@ int main() {
         torch::cuda::synchronize();
     });
 
-    std::cout << "Runtime (manual): " << std::fixed << std::setprecision(9) << time << "\n";
+    std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
       
     //std::cout << "Builtin output shape: " << out_builtin.sizes() << std::endl;
     std::cout << "Manual output shape:  " << out_manual.sizes() << std::endl;

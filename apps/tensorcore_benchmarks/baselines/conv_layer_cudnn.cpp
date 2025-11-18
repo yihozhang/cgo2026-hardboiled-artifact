@@ -32,7 +32,7 @@ using namespace Halide::Tools;
     } while (0)
 
 int main() {
-    #ifndef NN_TENSOR_N
+#ifndef NN_TENSOR_N
     const int N = 4096;
 #else
     const int N = NN_TENSOR_N;

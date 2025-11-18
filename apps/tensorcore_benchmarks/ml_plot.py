@@ -1,27 +1,59 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import time
+import subprocess
+import re
+
+def run_and_get_time_other(benchmark, build_args):
+    subprocess.run(f"cmake -S . -B build -DCMAKE_PREFIX_PATH=../../halide-install {build_args}", shell=True)
+    subprocess.run(f"cmake --build build --target {benchmark}", shell=True)
+
+    result = subprocess.run(f"build/{benchmark}", capture_output=True, text=True, timeout=1000)
+    output = result.stdout
+        
+    time_match = re.search(r'Runtime:\s*([0-9.]+)\n', output)
+    if time_match:
+        return float(time_match.group(1)) * 1000
+    else:
+        print(f"Could not parse timing from output: {output}")
+        os.system("exit")
+    
+
+def run_and_get_time_halide(benchmark, schedule, param):
+    print(f"bash ./rebuild.sh -t host -b {benchmark} -s {schedule} {param}")
+    subprocess.run(f"bash ./rebuild.sh -t host -b {benchmark} -s {schedule} {param}", shell=True)
+    
+    result = subprocess.run(f"./build/{benchmark}", capture_output=True, text=True, timeout=1000)
+    output = result.stdout
+        
+    time_match = re.search(r'Runtime:\s*([0-9.]+)\n', output)
+    if time_match:
+        return float(time_match.group(1)) * 1000
+    else:
+        print(f"Could not parse timing from output: {output}")
+        os.system("exit")
 
 # Organize the benchmark data
 benchmark_data = {
     'MatMul\n(1024³)': {
-        'Halide (Tensor Cores)': 0.066,
-        'Halide (CUDA-only)': 0.223,
-        'cuBLASLt': 0.043
+        'Halide (Tensor Cores)': run_and_get_time_halide("matmul", "tensorcore", "-mm_mnk 1024 1024 1024"),
+        'Halide (CUDA-only)': run_and_get_time_halide("matmul", "cudaonly", "-mm_mnk 1024 1024 1024"),
+        'cuBLASLt': run_and_get_time_other("matmul_cublas", "-DMATMUL_M=1024 -DMATMUL_N=1024 -DMATMUL_K=1024")
     },
     'Conv Layer\n(16 channels)': {
-        'Halide (Tensor Cores)': 1.052,
-        'PyTorch': 3.910,
-        'cuDNN': 1.631
+        'Halide (Tensor Cores)': run_and_get_time_halide("conv_layer", "tensorcore", "-conv_k 3 -nhwc 4096 64 64 16"),
+        'PyTorch': run_and_get_time_other("conv_layer_pytorch", "-DNN_TENSOR_N=4096 -DNN_TENSOR_H=64 -DNN_TENSOR_W=64 -DNN_TENSOR_C=16 -DKERNEL_SIZE=3"),
+        'cuDNN': run_and_get_time_other("conv_layer_cudnn", "-DNN_TENSOR_N=4096 -DNN_TENSOR_H=64 -DNN_TENSOR_W=64 -DNN_TENSOR_C=16 -DKERNEL_SIZE=3")
     },
     'Conv Layer\n(32 channels)': {
-        'Halide (Tensor Cores)': 5.343,
-        'PyTorch': 6.601,
-        'cuDNN': 2.974
+        'Halide (Tensor Cores)': run_and_get_time_halide("conv_layer", "tensorcore", "-conv_k 3 -nhwc 4096 64 64 32"),
+        'PyTorch': run_and_get_time_other("conv_layer_pytorch", "-DNN_TENSOR_N=4096 -DNN_TENSOR_H=64 -DNN_TENSOR_W=64 -DNN_TENSOR_C=32 -DKERNEL_SIZE=3"),
+        'cuDNN': run_and_get_time_other("conv_layer_cudnn", "-DNN_TENSOR_N=4096 -DNN_TENSOR_H=64 -DNN_TENSOR_W=64 -DNN_TENSOR_C=32 -DKERNEL_SIZE=3")
     },
     'Attention\n(N=64, L=4096)': {
-        'Halide (Tensor Cores)': 27.845,
-        'PyTorch': 33.553,
-        'Composed Impl.': 20.779
+        'Halide (Tensor Cores)': run_and_get_time_halide("attention", "tensorcore", "-att 64 4096 64"),
+        'PyTorch': run_and_get_time_other("attention_pytorch", "-DATT_D=64 -DATT_L=4096 -DATT_N=64"),
+        'Composed Impl.': run_and_get_time_other("attention_cudnn", "-DATT_D=64 -DATT_L=4096 -DATT_N=64"),
     }
 }
 

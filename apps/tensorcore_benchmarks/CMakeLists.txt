@@ -377,13 +377,6 @@ target_compile_definitions(matmul_cublas
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
 )
 
-target_compile_definitions(attention_cudnn
-    PRIVATE
-    ATT_D=${ATT_D}
-    ATT_L=${ATT_L}
-    ATT_N=${ATT_N}
-)
-
 target_compile_definitions(conv_layer_cudnn
     PRIVATE
     NN_TENSOR_N=${NN_TENSOR_N}
@@ -393,8 +386,33 @@ target_compile_definitions(conv_layer_cudnn
     KERNEL_SIZE=${CONV_KERNEL_SIZE}
 )
 
+target_compile_definitions(conv_layer_pytorch 
+    PRIVATE
+    _GLIBCXX_USE_CXX11_ABI=1    
+    PRIVATE
+    NN_TENSOR_N=${NN_TENSOR_N}
+    NN_TENSOR_H=${NN_TENSOR_H}
+    NN_TENSOR_W=${NN_TENSOR_W}
+    NN_TENSOR_C=${NN_TENSOR_C}
+    KERNEL_SIZE=${CONV_KERNEL_SIZE}
+)
+
+target_compile_definitions(attention_cudnn
+    PRIVATE
+    ATT_D=${ATT_D}
+    ATT_L=${ATT_L}
+    ATT_N=${ATT_N}
+)
+
+target_compile_definitions(attention_pytorch
+    PRIVATE
+    ATT_D=${ATT_D}
+    ATT_L=${ATT_L}
+    ATT_N=${ATT_N}
+    _GLIBCXX_USE_CXX11_ABI=1
+)
+
 target_include_directories(attention_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
 target_include_directories(conv_layer_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
 
-target_compile_definitions(conv_layer_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
-target_compile_definitions(attention_pytorch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+

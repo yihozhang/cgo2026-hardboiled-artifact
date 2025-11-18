@@ -7,8 +7,35 @@ using namespace Halide::Tools;
 
 int main() {
     torch::Device device(torch::kCUDA);
-    
-    const int N = 4096, C_in = 32, C_out = 32, H = 64, W = 64;
+#ifndef NN_TENSOR_N
+    const int N = 4096;
+#else
+    const int N = NN_TENSOR_N;
+#endif
+
+#ifndef NN_TENSOR_C
+    const int C_in = 16, C_out = 16;
+#else
+    const int C_in = NN_TENSOR_C, C_out = NN_TENSOR_C;
+#endif
+
+#ifndef NN_TENSOR_H
+    const int H = 64;
+#else
+    const int H = NN_TENSOR_H;
+#endif
+
+#ifndef NN_TENSOR_W
+    const int W = 64;
+#else
+    const int W = NN_TENSOR_W;
+#endif
+
+#ifndef KERNEL_SIZE
+    const int kSize = 3;
+#else
+    const int kSize = KERNEL_SIZE;
+#endif
 
     // Input: half precision, channels_last
     auto input = torch::randn({N, C_in, H, W},

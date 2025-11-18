@@ -11,14 +11,14 @@ import argparse
 import time
 from pathlib import Path
 
-def run_benchmark(benchmark_name, schedule, kernel_size, bin_path="./bin"):
+def run_benchmark(benchmark_name, schedule, kernel_size, bin_path="./build"):
     """
     Run the benchmark for a given schedule and kernel size.
     Returns the execution time in milliseconds.
     """
-    target_path = f"{bin_path}/{schedule}_{kernel_size}/{benchmark_name}"
-    
-    os.system(f"make {target_path}")
+    target_path = f"{bin_path}/{benchmark_name}"
+
+    os.system(f"bash ./rebuild.sh -b {benchmark_name} -conv_k {kernel_size} -conv_col 4096 -conv_row 4096 -v -t host -s {schedule}")
     
     try:
         # Run the benchmark and capture output
@@ -95,7 +95,7 @@ def load_benchmark_results_from_csv(benchmark_name, kernel_sizes, cache_dir="./c
     print(f"Results loaded from {csv_path}")
     return cudaonly_times, tensorcore_times
 
-def collect_benchmark_data(benchmark_name, kernel_sizes, bin_path="./bin", use_cache=False, cache_dir="./cache"):
+def collect_benchmark_data(benchmark_name, kernel_sizes, bin_path="./build", use_cache=False, cache_dir="./cache"):
     """
     Collect benchmark data either by running benchmarks or loading from cache.
     """
@@ -481,8 +481,8 @@ def main():
         print("Generating bar charts...")
         do_benchmark_bar_chart(use_cache=args.use_cache, cache_dir=args.cache_dir)
 
-    if args.all:
-        do_compilation_time_chart()
+    # if args.all:
+    #     do_compilation_time_chart()
 
 if __name__ == "__main__":
     main()

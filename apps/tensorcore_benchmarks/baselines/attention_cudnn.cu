@@ -376,7 +376,7 @@ void run_attention_benchmark() {
         cudaDeviceSynchronize();
     });
 
-    std::cout << "Runtime: " << time << " s\n";
+    std::cout << "Runtime: " << time << "\n";
 
     // TODO: (Optional) Copy output to host for correctness check
     // TODO: Free device memory and destroy descriptors
