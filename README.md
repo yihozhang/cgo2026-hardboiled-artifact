@@ -92,6 +92,9 @@ The data reported in the paper is done on an Nvidia A100 (ML workloads) and an R
 processing workloads), for which the Halide schedule is carefully tuned. We cannot guarantee the
 same speedup if a different GPU is used.
 
+If you are on an older GPU, you may need to replace `cuda_capability_80` with `cuda_capability_75`
+ in `apps/tensorcore_benchmarks/CMakeList.txt`.
+
 ### Performance comparison on ML workloads
 
 ```
