@@ -84,7 +84,7 @@
               x-lanes)
     )
 ) (
-    (let new-lhs (Call "tile_load" (BFloat 16 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 r-lanes) (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
+    (let new-lhs (Call "tile_load" (BFloat 16 (* x-lanes r-lanes)) (vec-of (IntImm16 x-lanes) (IntImm16 (* r-lanes 2)) (Var (Handle 1) lhs-name) lhs-base x-stride) (Intrinsic)))
     (amx-float-lhs orig-lhs x-lanes y-lanes r-lanes new-lhs)
 ) :ruleset amx)
 
@@ -141,7 +141,7 @@
         )
     )
 ) (
-    (let amx-rhs (Call "tile_load" (BFloat 16 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 2)) (IntImm16 (* y-lanes 2)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride) (Intrinsic)))
+    (let amx-rhs (Call "tile_load" (BFloat 16 (* r-lanes y-lanes)) (vec-of (IntImm16 (/ r-lanes 2)) (IntImm16 (* y-lanes 4)) (Var (Handle 1) rhs-name) rhs-base rhs-r-stride) (Intrinsic)))
     (amx-float-rhs orig-rhs x-lanes y-lanes r-lanes amx-rhs)
 ) :ruleset amx)
 
@@ -243,7 +243,7 @@
         rhs-type
         (vec-of
             (IntImm16 (/ r-lanes 2))
-            (IntImm16 (* y-lanes 2))
+            (IntImm16 (* y-lanes 4))
             (Var (Handle 1) (ExprVar (Mem) 
                 (Call "KWayInterleave" (BFloat 16 (* y-lanes r-lanes)) 
                     (vec-of (IntImm32 2) 
