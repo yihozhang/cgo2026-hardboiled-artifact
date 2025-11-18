@@ -103,7 +103,7 @@ This should generate a `benchmark_comparison.pdf` under `apps/tensorcore_benchma
 ### Conv1D performance comparison
 
 ```
-python3 ml_plot.py --line-plot
+python3 generate_plot.py --line-plot
 ```
 
 This should generate a `conv1d_performance_comparison.pdf`.
@@ -111,7 +111,7 @@ This should generate a `conv1d_performance_comparison.pdf`.
 ### Performance comparison on 2D microbenchmarks
 
 ```
-python3 ml_plot.py --bar-chart
+ python3 generate_plot.py --bar-chart
 ```
 
 ### Building and running the case studies
