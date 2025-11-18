@@ -280,7 +280,7 @@ int main(int argc, char **argv) {
     }
 
     // Create output buffer
-    Buffer<float> output(M, N);
+    Buffer<float> output(N, M);
 
     // Call the generated function
     auto time = benchmark(5, 5, [&]() {
@@ -410,7 +410,7 @@ int main(int argc, char **argv) {
                         expected = std::max(0.0f, expected);
 
                         if (fabs(expected - output(c, w, h, n)) > 0.001f) {
-                            std::cerr << "Error at (" << c << ", " << w << ", " << w << ", " << n << "): "
+                            std::cerr << "Error at (" << c << ", " << w << ", " << h << ", " << n << "): "
                                     << std::fixed << std::setprecision(10)
                                     << output(c, w, h, n) << " != " << expected << "\n";
                             success = false;
