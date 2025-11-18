@@ -60,6 +60,7 @@ add_halide_generator(upsample.generator SOURCES upsample_generator.cpp)
 add_halide_generator(downsample.generator SOURCES downsample_generator.cpp)
 add_halide_generator(denoise.generator SOURCES denoise_generator.cpp)
 add_halide_generator(resize.generator SOURCES resize_generator.cpp)
+add_halide_generator(rec_filter.generator SOURCES rec_filter_generator.cpp)
 add_halide_generator(matmul.generator SOURCES matmul_generator.cpp)
 add_halide_generator(conv_layer.generator SOURCES conv_layer_generator.cpp)
 add_halide_generator(attention.generator SOURCES attention_generator.cpp)
@@ -85,6 +86,14 @@ add_denoise_library(denoise_lib denoise host-cuda-cuda_capability_80)
 add_denoise_library(denoise_lib_win denoise x86-64-windows-cuda-cuda_capability_80)
 add_denoise_library(denoise_lib_linux denoise x86-64-linux-cuda-cuda_capability_80)
 
+add_resize_library(resize resize host-cuda-cuda_capability_80 "")
+add_resize_library(resize resize x86-64-windows-cuda-cuda_capability_80 "_win")
+add_resize_library(resize resize x86-64-linux-cuda-cuda_capability_80 "_linux")
+
+add_recfilter_library(rec_filter_lib rec_filter host-cuda-cuda_capability_80)
+add_recfilter_library(rec_filter_lib_win rec_filter x86-64-windows-cuda-cuda_capability_80)
+add_recfilter_library(rec_filter_lib_linux rec_filter x86-64-linux-cuda-cuda_capability_80)
+
 add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_80)
@@ -97,29 +106,6 @@ add_attn_library(attention_lib attention host-cuda-cuda_capability_80)
 add_attn_library(attention_lib_win attention x86-64-windows-cuda-cuda_capability_80)
 add_attn_library(attention_lib_linux attention x86-64-linux-cuda-cuda_capability_80)
 
-# Resize needs TWO libraries: resize_up and resize_down
-add_halide_library(resize_up_lib
-    FROM resize.generator
-    GENERATOR resize
-    FUNCTION_NAME resize_up
-    TARGETS host-cuda-cuda_capability_80
-    PARAMS 
-        gpu_schedule=${SCHEDULE}
-        upsample=true
-    EXTRA_OUTPUTS assembly llvm_assembly stmt
-)
-
-add_halide_library(resize_down_lib
-    FROM resize.generator
-    GENERATOR resize
-    FUNCTION_NAME resize_down
-    TARGETS host-cuda-cuda_capability_80
-    PARAMS 
-        gpu_schedule=${SCHEDULE}
-        upsample=false
-    EXTRA_OUTPUTS assembly llvm_assembly stmt
-)
-
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
 add_executable(conv2d process.cpp)
@@ -128,6 +114,7 @@ add_executable(upsample process.cpp)
 add_executable(downsample process.cpp)
 add_executable(denoise process.cpp)
 add_executable(resize process.cpp)
+add_executable(rec_filter process.cpp)
 add_executable(conv_layer process.cpp)
 add_executable(attention process.cpp)
 
@@ -197,6 +184,16 @@ target_compile_definitions(resize
     BENCHMARK_NAME="resize"
     RUN_resize
     IMG_ROW=${CONV_IMG_ROW}
+    IMG_COL=${CONV_IMG_COL}
+    SCHEDULE="${SCHEDULE}"
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
+target_compile_definitions(rec_filter
+    PRIVATE
+    BENCHMARK_HEADER="rec_filter_lib.h"
+    BENCHMARK_NAME="rec_filter"
+    RUN_rec_filter
     IMG_COL=${CONV_IMG_COL}
     SCHEDULE="${SCHEDULE}"
     VERIFY_OUTPUT=${VERIFY_OUTPUT}
@@ -285,6 +282,13 @@ target_link_libraries(resize
     Halide::Tools
     PNG::PNG
     JPEG::JPEG
+)
+
+target_link_libraries(rec_filter
+    PRIVATE
+    rec_filter_lib
+    Halide::Halide
+    Halide::Tools
 )
 
 target_link_libraries(matmul

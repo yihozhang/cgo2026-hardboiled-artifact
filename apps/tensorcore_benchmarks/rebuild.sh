@@ -27,7 +27,7 @@ show_help() {
     echo "Build Halide benchmarks for different targets"
     echo ""
     echo "Options:"
-    echo "  -b,         --benchmark NAME            Benchmark to build (conv1d, conv2d, upsample, downsample, denoise, resize, matmul, conv_layer, attention) [default: conv1d]"
+    echo "  -b,         --benchmark NAME            Benchmark to build (conv1d, conv2d, upsample, downsample, denoise, resize, rec_filter, matmul, conv_layer, attention) [default: conv1d]"
     echo "  -t,         --target TARGET             Target architecture (host, win, or linux) [default: host]"
     echo "  -s,         --schedule SCHEDULE         Schedule to use (cudaonly or tensorcore) [default: cudaonly]"
     echo "  -conv_k,    --kernel-size KERNEL_SIZE   Kernel size (128) [default: 128]"
@@ -109,8 +109,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate benchmark name
-if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample|conv_layer|attention|denoise|resize)$ ]]; then
-    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be one of: conv1d, conv2d, upsample, downsample, denoise, resize, matmul, conv_layer, attention"
+if [[ ! "$BENCHMARK" =~ ^(conv1d|conv2d|matmul|upsample|downsample|conv_layer|attention|denoise|resize|rec_filter)$ ]]; then
+    echo "Error: Invalid benchmark name '$BENCHMARK'. Must be one of: conv1d, conv2d, upsample, downsample, denoise, resize, rec_filter, matmul, conv_layer, attention"
     exit 1
 fi
 
