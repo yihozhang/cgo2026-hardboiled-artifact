@@ -85,10 +85,6 @@ add_denoise_library(denoise_lib denoise host-cuda-cuda_capability_80)
 add_denoise_library(denoise_lib_win denoise x86-64-windows-cuda-cuda_capability_80)
 add_denoise_library(denoise_lib_linux denoise x86-64-linux-cuda-cuda_capability_80)
 
-add_resize_library(resize_lib resize host-cuda-cuda_capability_80)
-add_resize_library(resize_lib_win resize x86-64-windows-cuda-cuda_capability_80)
-add_resize_library(resize_lib_linux resize x86-64-linux-cuda-cuda_capability_80)
-
 add_matmul_library(matmul_lib matmul host-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_win matmul x86-64-windows-cuda-cuda_capability_80)
 add_matmul_library(matmul_lib_linux matmul x86-64-linux-cuda-cuda_capability_80)
@@ -100,6 +96,29 @@ add_nnl_library(conv_layer_lib_linux conv_layer x86-64-linux-cuda-cuda_capabilit
 add_attn_library(attention_lib attention host-cuda-cuda_capability_80)
 add_attn_library(attention_lib_win attention x86-64-windows-cuda-cuda_capability_80)
 add_attn_library(attention_lib_linux attention x86-64-linux-cuda-cuda_capability_80)
+
+# Resize needs TWO libraries: resize_up and resize_down
+add_halide_library(resize_up_lib
+    FROM resize.generator
+    GENERATOR resize
+    FUNCTION_NAME resize_up
+    TARGETS host-cuda-cuda_capability_80
+    PARAMS 
+        gpu_schedule=${SCHEDULE}
+        upsample=true
+    EXTRA_OUTPUTS assembly llvm_assembly stmt
+)
+
+add_halide_library(resize_down_lib
+    FROM resize.generator
+    GENERATOR resize
+    FUNCTION_NAME resize_down
+    TARGETS host-cuda-cuda_capability_80
+    PARAMS 
+        gpu_schedule=${SCHEDULE}
+        upsample=false
+    EXTRA_OUTPUTS assembly llvm_assembly stmt
+)
 
 # Create executables (only for host)
 add_executable(conv1d process.cpp)
@@ -173,7 +192,8 @@ target_compile_definitions(denoise
 
 target_compile_definitions(resize
     PRIVATE
-    BENCHMARK_HEADER="resize_lib.h"
+    BENCHMARK_HEADER="resize_up_lib.h"
+    BENCHMARK_HEADER_EXTRA="resize_down_lib.h"
     BENCHMARK_NAME="resize"
     RUN_resize
     IMG_ROW=${CONV_IMG_ROW}
@@ -259,11 +279,12 @@ target_link_libraries(denoise
 
 target_link_libraries(resize
     PRIVATE
-    resize_lib
+    resize_up_lib
+    resize_down_lib
     Halide::Halide
     Halide::Tools
-    #PNG::PNG
-    #JPEG::JPEG
+    PNG::PNG
+    JPEG::JPEG
 )
 
 target_link_libraries(matmul

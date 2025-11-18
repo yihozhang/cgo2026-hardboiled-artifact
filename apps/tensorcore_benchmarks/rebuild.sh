@@ -9,7 +9,6 @@ SCHEDULE="cudaonly"
 CONV_KERNEL_SIZE="128"
 CONV_IMG_COL="3840"
 CONV_IMG_ROW="2160"
-UPSAMPLE="true"
 NN_TENSOR_N="128"
 NN_TENSOR_H="64"
 NN_TENSOR_W="64"
@@ -98,9 +97,6 @@ while [[ $# -gt 0 ]]; do
             show_help
             exit 0
             ;;
-        -u|--upsample)
-            shift 1
-            ;;
         -v|--verify)
             shift 1
             ;;
@@ -134,7 +130,6 @@ cmake -S . -B build \
     -DCONV_KERNEL_SIZE=$CONV_KERNEL_SIZE \
     -DCONV_IMG_COL=$CONV_IMG_COL \
     -DCONV_IMG_ROW=$CONV_IMG_ROW \
-    -DUPSAMPLE=$UPSAMPLE \
     -DNN_TENSOR_N=$NN_TENSOR_N \
     -DNN_TENSOR_H=$NN_TENSOR_H \
     -DNN_TENSOR_W=$NN_TENSOR_W \

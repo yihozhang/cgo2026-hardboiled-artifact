@@ -25,7 +25,7 @@ benchmarks = [
     #{"-b": "denoise", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
 
     # Resize
-    {"-b": "resize", "-conv_col": 4096, "-conv_row": 4096, "-u": True, "-v": True},
+    {"-b": "resize", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
 
     # Matmul
     #{"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": True},
@@ -143,10 +143,6 @@ def dict_to_cmd_args(benchmark_dict):
         if flag == "-v" and value:
             args.append(flag)
         elif flag == "-v" and not value:
-            continue
-        elif flag == "-u" and value:
-            args.append(flag)
-        elif flag == "-u" and not value:
             continue
         elif isinstance(value, list):
             args.append(flag)
