@@ -328,12 +328,21 @@ target_link_libraries(attention
 
 # Baselines 
 add_executable(matmul_cublas baselines/matmul_baseline.cpp)
+add_executable(matmul_cublas_cudaonly baselines/matmul_baseline_cudaonly.cpp)
 add_executable(conv_layer_pytorch baselines/conv_layer_pytorch.cpp)
 add_executable(conv_layer_cudnn baselines/conv_layer_cudnn.cpp)
 add_executable(attention_pytorch baselines/attention_pytorch.cpp)
 add_executable(attention_cudnn baselines/attention_cudnn.cu)
 
 target_link_libraries(matmul_cublas
+    PRIVATE
+    Halide::Tools
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cublasLt
+)
+
+target_link_libraries(matmul_cublas_cudaonly
     PRIVATE
     Halide::Tools
     CUDA::cudart
@@ -370,6 +379,14 @@ target_link_libraries(attention_cudnn
 )
 
 target_compile_definitions(matmul_cublas
+    PRIVATE
+    MATMUL_M=${MATMUL_M}
+    MATMUL_N=${MATMUL_N}
+    MATMUL_K=${MATMUL_K}
+    VERIFY_OUTPUT=${VERIFY_OUTPUT}
+)
+
+target_compile_definitions(matmul_cublas_cudaonly
     PRIVATE
     MATMUL_M=${MATMUL_M}
     MATMUL_N=${MATMUL_N}

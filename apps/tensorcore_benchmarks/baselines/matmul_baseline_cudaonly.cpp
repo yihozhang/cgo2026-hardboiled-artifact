@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Running " << benchmark_name << " with:" << std::endl;
     std::cout << "  Matrix size: " << M << "x" << N << "x" << K << std::endl;
-    std::cout << "  Schedule: cublas_no_tc" << std::endl;
+    std::cout << "  Schedule: cublas_cudaonly" << std::endl;
 
     // Create matrix buffers with random values
     half* h_A = new half[M * K];
