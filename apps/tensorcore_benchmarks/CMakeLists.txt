@@ -331,6 +331,7 @@ add_executable(matmul_cublas baselines/matmul_baseline.cpp)
 add_executable(matmul_cublas_cudaonly baselines/matmul_baseline_cudaonly.cpp)
 add_executable(conv_layer_pytorch baselines/conv_layer_pytorch.cpp)
 add_executable(conv_layer_cudnn baselines/conv_layer_cudnn.cpp)
+add_executable(conv_layer_cudnn_cudaonly baselines/conv_layer_cudnn_cudaonly.cpp)
 add_executable(attention_pytorch baselines/attention_pytorch.cpp)
 add_executable(attention_cudnn baselines/attention_cudnn.cu)
 
@@ -357,6 +358,13 @@ target_link_libraries(conv_layer_pytorch
 )
 
 target_link_libraries(conv_layer_cudnn
+    PRIVATE
+    Halide::Tools
+    CUDA::cudart
+    ${CUDNN_LIBRARY}
+)
+
+target_link_libraries(conv_layer_cudnn_cudaonly
     PRIVATE
     Halide::Tools
     CUDA::cudart
@@ -403,6 +411,15 @@ target_compile_definitions(conv_layer_cudnn
     KERNEL_SIZE=${CONV_KERNEL_SIZE}
 )
 
+target_compile_definitions(conv_layer_cudnn_cudaonly
+    PRIVATE
+    NN_TENSOR_N=${NN_TENSOR_N}
+    NN_TENSOR_H=${NN_TENSOR_H}
+    NN_TENSOR_W=${NN_TENSOR_W}
+    NN_TENSOR_C=${NN_TENSOR_C}
+    KERNEL_SIZE=${CONV_KERNEL_SIZE}
+)
+
 target_compile_definitions(conv_layer_pytorch 
     PRIVATE
     _GLIBCXX_USE_CXX11_ABI=1    
@@ -431,5 +448,6 @@ target_compile_definitions(attention_pytorch
 
 target_include_directories(attention_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
 target_include_directories(conv_layer_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
+target_include_directories(conv_layer_cudnn_cudaonly PRIVATE ${CUDNN_INCLUDE_DIR})
 
 
