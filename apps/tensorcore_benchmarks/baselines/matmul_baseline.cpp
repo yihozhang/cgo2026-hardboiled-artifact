@@ -169,7 +169,9 @@ int main(int argc, char **argv) {
     cublasLtMatrixLayoutDestroy(b_desc);
     cublasLtMatrixLayoutDestroy(c_desc);
     cublasLtMatmulDescDestroy(op_desc);
+    cublasLtMatmulPreferenceDestroy(preference);
     cublasLtDestroy(lt_handle);
+    cublasDestroy(handle);
 
     std::cout << "Runtime: " << std::fixed << std::setprecision(9) << time << "\n";
 
