@@ -97,13 +97,16 @@ int main(int argc, char **argv) {
     check_cublas(cublasCreate(&handle), "creating cuBLAS handle");
     check_cublas(cublasLtCreate(&lt_handle), "creating cuBLASLt handle");
 
+    // Set PEDANTIC math mode to explicitly disable tensor cores
+    check_cublas(cublasSetMathMode(handle, CUBLAS_PEDANTIC_MATH), "setting pedantic math mode");
+
     // Describe matrices
     check_cublas(cublasLtMatrixLayoutCreate(&a_desc, CUDA_R_16F, K, M, K), "creating A desc");
     check_cublas(cublasLtMatrixLayoutCreate(&b_desc, CUDA_R_16F, N, K, N), "creating B desc");
     check_cublas(cublasLtMatrixLayoutCreate(&c_desc, CUDA_R_32F, N, M, N), "creating C desc");
 
     // Operation descriptor - CUBLAS_COMPUTE_32F disables tensor cores
-    check_cublas(cublasLtMatmulDescCreate(&op_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F), "creating op desc");
+    check_cublas(cublasLtMatmulDescCreate(&op_desc, CUBLAS_COMPUTE_32F_PEDANTIC, CUDA_R_32F), "creating op desc");
     
     // After creating the layouts, set them to column-major
     cublasLtOrder_t order = CUBLASLT_ORDER_COL;
@@ -120,16 +123,7 @@ int main(int argc, char **argv) {
         preference,
         CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
         &workspace_size,
-        sizeof(workspace_size)), "setting workspace size");
-    
-    // Explicitly disable tensor core operations
-    uint32_t disable_tc = 1;
-    check_cublas(cublasLtMatmulPreferenceSetAttribute(
-        preference,
-        CUBLASLT_MATMUL_PREF_DISABLE_TENSOR_OP_MATH,
-        &disable_tc,
-        sizeof(disable_tc)), "disabling tensor cores");
-        
+        sizeof(workspace_size)), "setting workspace size");      
 
     // Heuristic search (picks the best kernel config)
     cublasLtMatmulHeuristicResult_t heuristicResult;
