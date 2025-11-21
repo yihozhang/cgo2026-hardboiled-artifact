@@ -334,6 +334,7 @@ add_executable(conv_layer_cudnn baselines/conv_layer_cudnn.cpp)
 add_executable(conv_layer_cudnn_cudaonly baselines/conv_layer_cudnn_cudaonly.cpp)
 add_executable(attention_pytorch baselines/attention_pytorch.cpp)
 add_executable(attention_cudnn baselines/attention_cudnn.cu)
+add_executable(attention_cudnn_cudaonly baselines/attention_cudnn_cudaonly.cu)
 
 target_link_libraries(matmul_cublas
     PRIVATE
@@ -378,6 +379,15 @@ target_link_libraries(attention_pytorch
 )
 
 target_link_libraries(attention_cudnn
+    PRIVATE
+    Halide::Tools
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cublasLt
+    ${CUDNN_LIBRARY}
+)
+
+target_link_libraries(attention_cudnn_cudaonly
     PRIVATE
     Halide::Tools
     CUDA::cudart
@@ -438,6 +448,13 @@ target_compile_definitions(attention_cudnn
     ATT_N=${ATT_N}
 )
 
+target_compile_definitions(attention_cudnn_cudaonly
+    PRIVATE
+    ATT_D=${ATT_D}
+    ATT_L=${ATT_L}
+    ATT_N=${ATT_N}
+)
+
 target_compile_definitions(attention_pytorch
     PRIVATE
     ATT_D=${ATT_D}
@@ -447,6 +464,7 @@ target_compile_definitions(attention_pytorch
 )
 
 target_include_directories(attention_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
+target_include_directories(attention_cudnn_cudaonly PRIVATE ${CUDNN_INCLUDE_DIR})
 target_include_directories(conv_layer_cudnn PRIVATE ${CUDNN_INCLUDE_DIR})
 target_include_directories(conv_layer_cudnn_cudaonly PRIVATE ${CUDNN_INCLUDE_DIR})
 
