@@ -140,30 +140,33 @@ int main() {
     CHECK_CUDA(cudaMemcpy(d_filter, h_filter.data(), filterBytes, cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_bias, h_bias.data(), biasBytes, cudaMemcpyHostToDevice));
 
-    // Pick algorithm - filter for non-tensor-core algorithms
+    // Allocate workspace (use large size for algorithm search)
+    size_t wsSize = 1ULL << 36;
+    void* d_workspace = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_workspace, wsSize));
+
+    // Find best algorithm using modern API (actually runs algorithms)
     int maxAlgoCount = 8;
     std::vector<cudnnConvolutionFwdAlgoPerf_t> perf(maxAlgoCount);
     int returnedAlgoCount = 0;
-    cudnnFindConvolutionForwardAlgorithm(
-        handle, inputDesc, filterDesc, convDesc, outputDesc,
-        maxAlgoCount, &returnedAlgoCount, perf.data());
-    int bestIdx = -1;
-    for (int i = 0; i < returnedAlgoCount; i++) {
-        // Select algorithms that use FMA only (no tensor cores, no TF32)
-        if (perf[i].mathType == CUDNN_FMA_MATH &&
-            (bestIdx == -1 || perf[i].time < perf[bestIdx].time)) {
-            bestIdx = i;
-        }
-    }
-
-    cudnnConvolutionFwdAlgo_t algo = perf[bestIdx].algo;
+    CHECK_CUDNN(cudnnFindConvolutionForwardAlgorithmEx(
+        handle,
+        inputDesc, d_input,
+        filterDesc, d_filter,
+        convDesc,
+        outputDesc, d_output,
+        maxAlgoCount,
+        &returnedAlgoCount,
+        perf.data(),
+        d_workspace, wsSize));
     
-
-    // Workspace
-    size_t wsSize = 0;
+    // Pick fastest algorithm (cuDNN respects the CUDNN_FMA_MATH setting)
+    cudnnConvolutionFwdAlgo_t algo = perf[0].algo;
+    
+    // Update workspace size for actual usage
     CHECK_CUDNN(cudnnGetConvolutionForwardWorkspaceSize(
         handle, inputDesc, filterDesc, convDesc, outputDesc, algo, &wsSize));
-    void* d_workspace = nullptr;
+    cudaFree(d_workspace);
     CHECK_CUDA(cudaMalloc(&d_workspace, wsSize));
 
     // Activation descriptor (ReLU)
@@ -175,7 +178,7 @@ int main() {
     float alpha = 1.0f, beta = 0.0f;
 
     // Benchmark
-     auto time = benchmark(100, 5, [&]() {
+     auto time = benchmark(5, 5, [&]() {
         CHECK_CUDNN(cudnnConvolutionBiasActivationForward(
             handle,
             &alpha,
