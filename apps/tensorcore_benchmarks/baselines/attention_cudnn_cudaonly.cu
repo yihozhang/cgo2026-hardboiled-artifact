@@ -311,6 +311,10 @@ void compute_output() {
 
 // === Step 5: Benchmark Harness ===
 void run_attention_benchmark() {
+    std::cout << "Running attention with:" << std::endl;
+    std::cout << "  Input size: N=" << N << " L=" << L << " D=" << D << std::endl;
+    std::cout << "  Schedule: cudnn_cudaonly (no tensor cores)" << std::endl;
+
     allocate_and_init();
 
     auto time = Halide::Tools::benchmark(5, 5, [&]() {
