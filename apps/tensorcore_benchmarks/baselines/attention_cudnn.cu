@@ -59,11 +59,18 @@ cudnnHandle_t cudnn_handle;
 half *d_Q, *d_K, *d_V, *d_probs_fp16;
 float *d_scores, *d_probs, *d_output;
 
+// First matmul (Q×K^T) descriptors
 cublasLtMatrixLayout_t aDesc, bDesc, cDesc;
 cublasLtMatmulDesc_t op;
+cublasLtMatmulHeuristicResult_t heur;
+
+// Second matmul (probs×V) descriptors
+cublasLtMatrixLayout_t aDesc2, bDesc2, cDesc2;
+cublasLtMatmulDesc_t op2;
+cublasLtMatmulHeuristicResult_t heur2;
+
 size_t workspaceSize = 1 << 30;
 void* workspace = nullptr;
-cublasLtMatmulHeuristicResult_t heur;
 
 // TODO: Add error-check macros for cuDNN similar to check_cublas/check_cuda
 
@@ -167,9 +174,54 @@ void allocate_and_init() {
     cublasStatus_t st = cublasLtMatmulAlgoGetHeuristic(
         lt_handle, op, aDesc, bDesc, cDesc, cDesc, pref, 1, &heur, &returned);
     if (st != CUBLAS_STATUS_SUCCESS || returned == 0) {
-        std::cerr << "Lt heuristic failed (status=" << st << ", returned=" << returned << ")\n";
+        std::cerr << "Lt heuristic failed for QK^T (status=" << st << ", returned=" << returned << ")\n";
         std::exit(EXIT_FAILURE);
     }
+
+    // === Setup second matmul: probs×V -> output ===
+    // Dimensions: probs[LxL] × V[LxD] -> output[LxD]
+    const int m2 = L, n2 = D, k2 = L;
+
+    // Operation descriptor for probs×V
+    check_cublas(cublasLtMatmulDescCreate(&op2, CUBLAS_COMPUTE_32F_FAST_16F, CUDA_R_32F),
+                 "create matmul desc 2");
+    cublasOperation_t transA2 = CUBLAS_OP_N;  // probs
+    cublasOperation_t transB2 = CUBLAS_OP_N;  // V
+    check_cublas(cublasLtMatmulDescSetAttribute(op2, CUBLASLT_MATMUL_DESC_TRANSA, &transA2, sizeof(transA2)),
+                 "set transA2");
+    check_cublas(cublasLtMatmulDescSetAttribute(op2, CUBLASLT_MATMUL_DESC_TRANSB, &transB2, sizeof(transB2)),
+                 "set transB2");
+
+    // Matrix layouts for second matmul (ROW-MAJOR)
+    check_cublas(cublasLtMatrixLayoutCreate(&aDesc2, CUDA_R_16F, /*rows*/m2, /*cols*/k2, /*ld*/k2), "A2 layout");
+    check_cublas(cublasLtMatrixLayoutCreate(&bDesc2, CUDA_R_16F, /*rows*/k2, /*cols*/n2, /*ld*/n2), "B2 layout");
+    check_cublas(cublasLtMatrixLayoutCreate(&cDesc2, CUDA_R_32F, /*rows*/m2, /*cols*/n2, /*ld*/n2), "C2 layout");
+
+    check_cublas(cublasLtMatrixLayoutSetAttribute(aDesc2, CUBLASLT_MATRIX_LAYOUT_ORDER, &row, sizeof(row)), "A2 order");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(bDesc2, CUBLASLT_MATRIX_LAYOUT_ORDER, &row, sizeof(row)), "B2 order");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(cDesc2, CUBLASLT_MATRIX_LAYOUT_ORDER, &row, sizeof(row)), "C2 order");
+
+    // Strided batch for second matmul
+    long long strideA2 = (long long)L * L;  // probs
+    long long strideB2 = (long long)L * D;  // V
+    long long strideC2 = (long long)L * D;  // output
+    check_cublas(cublasLtMatrixLayoutSetAttribute(aDesc2, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &N, sizeof(N)), "A2 bc");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(bDesc2, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &N, sizeof(N)), "B2 bc");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(cDesc2, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &N, sizeof(N)), "C2 bc");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(aDesc2, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &strideA2, sizeof(strideA2)), "A2 stride");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(bDesc2, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &strideB2, sizeof(strideB2)), "B2 stride");
+    check_cublas(cublasLtMatrixLayoutSetAttribute(cDesc2, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &strideC2, sizeof(strideC2)), "C2 stride");
+
+    // Heuristic for second matmul
+    int returned2 = 0;
+    cublasStatus_t st2 = cublasLtMatmulAlgoGetHeuristic(
+        lt_handle, op2, aDesc2, bDesc2, cDesc2, cDesc2, pref, 1, &heur2, &returned2);
+    if (st2 != CUBLAS_STATUS_SUCCESS || returned2 == 0) {
+        std::cerr << "Lt heuristic failed for probs×V (status=" << st2 << ", returned=" << returned2 << ")\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    cublasLtMatmulPreferenceDestroy(pref);
 }
 
 // === Step 2: Compute Scores = (Q x K^T) / sqrt(D) ===
@@ -319,50 +371,18 @@ void softmax_scores() {
 
 // === Step 4: Compute Output = probs x V ===
 void compute_output() {
-    int m = L;  // rows of A (probs)
-    int n = D;  // cols of B (V)
-    int k = L;  // shared dim
+    const float alpha = 1.0f, beta = 0.0f;
 
-    cublasOperation_t opA = CUBLAS_OP_T;
-    cublasOperation_t opB = CUBLAS_OP_T;
-
-    int lda = L; // cols of A in row-major
-    int ldb = L; // cols of B in row-major
-    int ldc = D; // cols of C in row-major
-
-    long long strideA = static_cast<long long>(L) * L;  // probs
-    long long strideB = static_cast<long long>(L) * D;  // V
-    long long strideC = static_cast<long long>(L) * D;  // output
-
-    float alpha = 1.0f;
-    float beta  = 0.0f;
-
-    cublasStatus_t stat = cublasGemmStridedBatchedEx(
-        cublas_handle,
-        opB, opA,
-        n, m, k,
-        &alpha,
-        d_V,          CUDA_R_16F, ldb, strideB,   // B
-        d_probs_fp16, CUDA_R_16F, lda, strideA,   // A (now half)
-        &beta,
-        d_output,     CUDA_R_32F, ldc, strideC,   // C
-        N,
-        CUBLAS_COMPUTE_32F_FAST_16F,
-        CUBLAS_GEMM_DEFAULT);
-
-    if (stat != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "cuBLAS error in compute_output: " << stat << "\n";
-        std::exit(EXIT_FAILURE);
-    }
-
-    /*std::vector<float> h_out(8);
-    check_cuda(cudaMemcpy(h_out.data(), d_output, 8 * sizeof(float), cudaMemcpyDeviceToHost),
-               "copying output back to host");
-    std::cout << "First few output values: ";
-    for (float val : h_out) {
-        std::cout << val << " ";
-    }
-    std::cout << "\n";*/
+    check_cublas(cublasLtMatmul(lt_handle, op2,
+                                &alpha,
+                                d_probs_fp16, aDesc2,
+                                d_V, bDesc2,
+                                &beta,
+                                d_output, cDesc2,
+                                d_output, cDesc2,
+                                &heur2.algo,
+                                workspace, workspaceSize, 0),
+                 "lt matmul probs×V");
 }
 
 // === Step 5: Benchmark Harness ===
@@ -395,6 +415,10 @@ int main() {
     cublasLtMatrixLayoutDestroy(bDesc);
     cublasLtMatrixLayoutDestroy(cDesc);
     cublasLtMatmulDescDestroy(op);
+    cublasLtMatrixLayoutDestroy(aDesc2);
+    cublasLtMatrixLayoutDestroy(bDesc2);
+    cublasLtMatrixLayoutDestroy(cDesc2);
+    cublasLtMatmulDescDestroy(op2);
 
     cudaFree(d_Q);
     cudaFree(d_K);
