@@ -35,6 +35,9 @@ benchmarks = [
 
     # Conv Layer (NHWC)
     {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": True},
+
+    # Attention (D x L x N)
+    {"-b": "attention", "-att": [64, 4096, 64], "-v": True},
 ]
 
 def run_or_exit(cmd, env=None):
@@ -72,6 +75,14 @@ def parse_benchmark_output(output):
         width = w
         height = h
         input_size = f"{n}x{h}x{w}x{c}"
+
+    # Extract DxLxN for attention
+    dln_match = re.search(r'DxLxN: (\d+)x(\d+)x(\d+)', output)
+    if dln_match:
+        d = int(dln_match.group(1))
+        l = int(dln_match.group(2))
+        n = int(dln_match.group(3))
+        input_size = f"{d}x{l}x{n}"
 
     # Extract matrix size
     image_match = re.search(r'Matrix size: (\d+)x(\d+)x(\d+)', output)
