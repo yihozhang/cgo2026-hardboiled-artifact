@@ -10,31 +10,32 @@ schedules = ["cudaonly", "tensorcore"]
 # Define each benchmark as a dictionary with command-line flag names
 benchmarks = [
     # Conv1D
-    {"-b": "conv1d", "-conv_k": 8, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    #{"-b": "conv1d", "-conv_k": 8, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
     
     # Conv2D
-    {"-b": "conv2d", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    #{"-b": "conv2d", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
     
     # Upsample
-    {"-b": "upsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    #{"-b": "upsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
     
     # Downsample
-    {"-b": "downsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    #{"-b": "downsample", "-conv_k": 16, "-conv_col": 4096, "-conv_row": 4096, "-v": True},
 
     # Denoise
-    {"-b": "denoise", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    #{"-b": "denoise", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
 
-    # Resize
-    {"-b": "resize", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
+    # Resizeg
+    #{"-b": "resize", "-conv_col": 4096, "-conv_row": 4096, "-v": True},
 
     # Rec filter
-    {"-b": "rec_filter", "-conv_col": 2097152, "-v": True},
+    #{"-b": "rec_filter", "-conv_col": 2097152, "-v": True},
 
     # Matmul
-    {"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": True},
+    #{"-b": "matmul", "-mm_mnk": [1024, 1024, 1024],  "-v": True},
+    #{"-b": "matmul", "-mm_mnk": [4096, 4096, 4096],  "-v": False},
 
     # Conv Layer (NHWC)
-    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 32], "-v": True},
+    {"-b": "conv_layer", "-conv_k": 3, "-nhwc": [128, 64, 64, 16], "-v": True},
 ]
 
 def run_or_exit(cmd, env=None):
