@@ -22,7 +22,7 @@ $ cmake -G Ninja -S llvm-project/llvm -B build \
         -DLLVM_ENABLE_TERMINFO=OFF \
         -DLLVM_ENABLE_ZLIB=OFF \
         -DLLVM_ENABLE_ZSTD=OFF \
-        -DLLVM_BUILD_32_BITS=OFF
+        -DLLVM_BUILD_32_BITS=OFF \
         -DLLVM_ENABLE_BINDINGS=OFF
 $ cmake --build build
 $ cmake --install build --prefix llvm-install
