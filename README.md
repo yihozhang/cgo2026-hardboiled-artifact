@@ -54,9 +54,9 @@ $ cargo install --path .
 
 ### Support for schedules in AMX
 
-To check that our AMX schedule runs using Intel's Software Development Emulator,
+To check that our AMX schedule runs using Intel's Software Development Emulator:
 
-Build the AMX schedules
+Build the AMX schedules under the Halide root directory.
 ```
 cmake --build build --target \
     instrsel-benchmarks_matmul_vnni_1x1 \
@@ -66,13 +66,13 @@ cmake --build build --target \
     instrsel-benchmarks_matmul_flat_1x4
 ```
 
-Run AMX schedules using a emulator
+Then run AMX schedules using an emulator. To do so,
 
 * First download and extract Intel Software Development Emulator
 
         https://www.intel.com/content/www/us/en/download/684897/intel-software-development-emulator.html
 
-* Then run the following command to simulate instruction sets of a Sapphire Rapids CPU.
+* Then run the following command to simulate instruction sets of a Sapphire Rapids CPU (again under the Halide root directory).
 
 ```
 <path-to-sde64> -spr -- build/instrsel-benchmarks/instrsel-benchmarks_matmul_vnni_1x1
